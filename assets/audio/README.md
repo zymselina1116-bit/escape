@@ -8,6 +8,7 @@ This directory should contain the ambient audio loops for each scene.
 - `pool.mp3` - Echo, soft dripping, underwater resonance for the Pool Tunnel
 - `hallway.mp3` - Echo, reverb hum, slow footsteps for the Hallway
 - `garden.mp3` - Soft breeze, leaves rustling, faint birdsong for the Garden
+- `star.mp3` - Deep space ambience, gentle synth pads, distant echoes for Star Space
 
 ## Notes:
 

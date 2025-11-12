@@ -20,6 +20,13 @@ const STATE = {
     audioSources: {},
     currentAudioSource: null,
     keys: {},
+    keysCollected: {
+        main: false,
+        pool: false,
+        hallway: false,
+        garden: false
+    },
+    victoryShown: false,
     mouse: {
         down: false,
         x: 0,
@@ -29,7 +36,16 @@ const STATE = {
     },
     cameraRotation: { yaw: 0, pitch: 0 },
     raycaster: new THREE.Raycaster(),
-    mouseVector: new THREE.Vector2()
+    mouseVector: new THREE.Vector2(),
+    webcam: {
+        video: null,
+        canvas: null,
+        context: null,
+        enabled: false,
+        motionX: 0,
+        motionY: 0,
+        motionStrength: 0
+    }
 };
 
 const CONFIG = {
@@ -46,7 +62,8 @@ const SCENE_LABELS = {
     main: 'Main Room',
     pool: 'Pool Tunnel',
     hallway: 'Hallway',
-    garden: 'Garden'
+    garden: 'Garden',
+    star: 'Star Space'
 };
 
 // ============================================================================
@@ -59,6 +76,7 @@ function init() {
     setupScenes();
     setupControls();
     setupAudio();
+    setupWebcam();
     animate();
 }
 
@@ -112,6 +130,7 @@ function setupScenes() {
     STATE.sceneGroups.pool = createPoolTunnel();
     STATE.sceneGroups.hallway = createHallway();
     STATE.sceneGroups.garden = createGarden();
+    STATE.sceneGroups.star = createStarSpace();
 
     // Add main room to scene initially
     STATE.activeScene.add(STATE.sceneGroups.main);
@@ -306,6 +325,27 @@ function createMainRoom() {
     });
     group.add(windowPortal);
 
+    // Window portal to Star Space
+    const starWindow = createPortal({
+        type: 'window',
+        position: [8, 2.5, 7],
+        size: [1.5, 3, 0.12],
+        color: 0x6688cc,
+        emissive: 0x99ddff,
+        emissiveIntensity: 0.6,
+        target: 'star',
+        transparent: true,
+        opacity: 0.7
+    });
+    group.add(starWindow);
+
+    // Collectible key on desk
+    const mainKey = createKey({
+        position: [-2, 1, -3],
+        scene: 'main'
+    });
+    group.add(mainKey);
+
     // Store scene properties
     group.userData = {
         properties: {
@@ -417,6 +457,13 @@ function createPoolTunnel() {
         target: 'main'
     });
     group.add(returnPortal);
+
+    // Collectible key floating above water
+    const poolKey = createKey({
+        position: [0, 1, -15],
+        scene: 'pool'
+    });
+    group.add(poolKey);
 
     group.userData = {
         properties: {
@@ -555,6 +602,13 @@ function createHallway() {
         target: 'main'
     });
     group.add(returnPortal);
+
+    // Collectible key between arches
+    const hallwayKey = createKey({
+        position: [0, 2, -25],
+        scene: 'hallway'
+    });
+    group.add(hallwayKey);
 
     group.userData = {
         properties: {
@@ -731,6 +785,13 @@ function createGarden() {
     });
     group.add(returnPortal);
 
+    // Collectible key near center of grass
+    const gardenKey = createKey({
+        position: [0, 1, 0],
+        scene: 'garden'
+    });
+    group.add(gardenKey);
+
     group.userData = {
         properties: {
             fog: new THREE.FogExp2(0xe7f8e9, 0.012),
@@ -742,6 +803,187 @@ function createGarden() {
         particles: particles,
         startPosition: new THREE.Vector3(0, CONFIG.cameraHeight, -5),
         startRotation: { yaw: 0, pitch: 0 }
+    };
+
+    return group;
+}
+
+// ============================================================================
+// STAR SPACE - Quiet Galaxy Field
+// ============================================================================
+
+function createStarSpace() {
+    const group = new THREE.Group();
+    group.name = 'star';
+
+    // Lighting - cool blue ambient
+    const ambientLight = new THREE.AmbientLight(0x8ac7ff, 0.5);
+    group.add(ambientLight);
+
+    // Directional rim light
+    const rimLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    rimLight.position.set(0, 10, 10);
+    group.add(rimLight);
+
+    // Add some additional point lights for atmosphere
+    const colors = [0x99ddff, 0x88ccff, 0xaaeeff];
+    for (let i = 0; i < 5; i++) {
+        const light = new THREE.PointLight(colors[i % colors.length], 0.3, 30);
+        light.position.set(
+            Math.random() * 40 - 20,
+            Math.random() * 20 - 10,
+            Math.random() * 40 - 20
+        );
+        group.add(light);
+    }
+
+    // Floating glowing particles (100 total)
+    const particles = [];
+    for (let i = 0; i < 100; i++) {
+        const size = Math.random() * 0.15 + 0.05;
+        const particle = new THREE.Mesh(
+            new THREE.SphereGeometry(size, 8, 8),
+            new THREE.MeshStandardMaterial({
+                color: 0x99ddff,
+                emissive: 0x99ddff,
+                emissiveIntensity: 0.8,
+                transparent: true,
+                opacity: 0.8
+            })
+        );
+
+        particle.position.set(
+            Math.random() * 40 - 20,
+            Math.random() * 40 - 20,
+            Math.random() * 40 - 20
+        );
+
+        // Store original position and random phase
+        particle.userData.originalPos = particle.position.clone();
+        particle.userData.phase = Math.random() * Math.PI * 2;
+        particle.userData.speed = Math.random() * 0.3 + 0.1;
+        particle.userData.radius = Math.random() * 2 + 1;
+
+        particles.push(particle);
+        group.add(particle);
+    }
+
+    // Central glowing key
+    const centralKey = createKey({
+        position: [0, 0, 0],
+        scene: 'star',
+        color: 0xffd700,
+        emissive: 0xffe38a,
+        isCentral: true
+    });
+    group.add(centralKey);
+
+    // Return portal (glowing door back to main)
+    const returnPortal = createPortal({
+        type: 'circular',
+        position: [0, 0, 15],
+        size: [3, 3, 0.2],
+        color: 0x6688cc,
+        emissive: 0x99ddff,
+        emissiveIntensity: 0.7,
+        target: 'main'
+    });
+    group.add(returnPortal);
+
+    group.userData = {
+        properties: {
+            fog: new THREE.FogExp2(0x0c0e26, 0.015),
+            background: new THREE.Color(0x0c0e26)
+        },
+        particles: particles,
+        centralKey: centralKey,
+        startPosition: new THREE.Vector3(0, CONFIG.cameraHeight, 12),
+        startRotation: { yaw: Math.PI, pitch: 0 }
+    };
+
+    return group;
+}
+
+// ============================================================================
+// KEY CREATION HELPER
+// ============================================================================
+
+function createKey(options) {
+    const {
+        position,
+        scene,
+        color = 0xffd700,
+        emissive = 0xffe38a,
+        isCentral = false
+    } = options;
+
+    const group = new THREE.Group();
+    group.name = 'key_' + scene;
+
+    // Key body (simple cylinder for handle)
+    const handle = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.03, 0.03, 0.2, 8),
+        new THREE.MeshStandardMaterial({
+            color: color,
+            emissive: emissive,
+            emissiveIntensity: 0.6,
+            metalness: 0.8,
+            roughness: 0.2
+        })
+    );
+    handle.rotation.z = Math.PI / 2;
+    group.add(handle);
+
+    // Key head (torus)
+    const head = new THREE.Mesh(
+        new THREE.TorusGeometry(0.08, 0.02, 8, 16),
+        new THREE.MeshStandardMaterial({
+            color: color,
+            emissive: emissive,
+            emissiveIntensity: 0.6,
+            metalness: 0.8,
+            roughness: 0.2
+        })
+    );
+    head.position.x = -0.15;
+    head.rotation.y = Math.PI / 2;
+    group.add(head);
+
+    // Key teeth (small boxes)
+    for (let i = 0; i < 3; i++) {
+        const tooth = new THREE.Mesh(
+            new THREE.BoxGeometry(0.02, 0.04, 0.02),
+            new THREE.MeshStandardMaterial({
+                color: color,
+                emissive: emissive,
+                emissiveIntensity: 0.6,
+                metalness: 0.8,
+                roughness: 0.2
+            })
+        );
+        tooth.position.set(0.05 + i * 0.03, -0.035, 0);
+        group.add(tooth);
+    }
+
+    // Glow sphere around key
+    const glow = new THREE.Mesh(
+        new THREE.SphereGeometry(0.18, 16, 16),
+        new THREE.MeshBasicMaterial({
+            color: emissive,
+            transparent: true,
+            opacity: 0.2
+        })
+    );
+    group.add(glow);
+
+    group.position.set(...position);
+    group.userData = {
+        scene: scene,
+        isKey: true,
+        collected: false,
+        glow: glow,
+        baseY: position[1],
+        isCentral: isCentral
     };
 
     return group;
@@ -953,25 +1195,96 @@ function checkPortalClick(event) {
 
     STATE.raycaster.setFromCamera(STATE.mouseVector, STATE.camera);
 
-    // Find all portal meshes in current scene
-    const portals = [];
+    // Find all interactive objects in current scene
+    const interactiveObjects = [];
     const currentGroup = STATE.sceneGroups[STATE.currentScene];
 
     currentGroup.traverse((obj) => {
+        // Check for portals
         if (obj.parent && obj.parent.userData.interactive) {
-            portals.push(obj);
+            interactiveObjects.push(obj);
+        }
+        // Check for keys
+        if (obj.parent && obj.parent.userData.isKey && !obj.parent.userData.collected) {
+            interactiveObjects.push(obj);
         }
     });
 
-    const intersects = STATE.raycaster.intersectObjects(portals, false);
+    const intersects = STATE.raycaster.intersectObjects(interactiveObjects, false);
 
     if (intersects.length > 0) {
         const clickedObject = intersects[0].object;
-        const portal = clickedObject.parent;
+        const parent = clickedObject.parent;
 
-        if (portal.userData.target) {
-            transitionToScene(portal.userData.target);
+        // Check if it's a portal
+        if (parent.userData.target) {
+            transitionToScene(parent.userData.target);
         }
+        // Check if it's a key
+        else if (parent.userData.isKey && !parent.userData.collected) {
+            collectKey(parent);
+        }
+    }
+}
+
+// ============================================================================
+// KEY COLLECTION
+// ============================================================================
+
+function collectKey(keyObject) {
+    const sceneName = keyObject.userData.scene;
+
+    // Mark as collected
+    keyObject.userData.collected = true;
+    STATE.keysCollected[sceneName] = true;
+
+    // Flash effect
+    const glow = keyObject.userData.glow;
+    if (glow) {
+        glow.material.opacity = 1.0;
+        setTimeout(() => {
+            if (glow.material) glow.material.opacity = 0.2;
+        }, 200);
+    }
+
+    // Make key invisible after collection
+    setTimeout(() => {
+        keyObject.visible = false;
+    }, 300);
+
+    // Update UI
+    updateKeyUI(sceneName);
+
+    // Check victory condition
+    checkVictoryCondition();
+
+    console.log(`Collected key from ${sceneName}`);
+}
+
+function updateKeyUI(sceneName) {
+    const keyElement = document.getElementById(`key-${sceneName}`);
+    if (keyElement) {
+        keyElement.textContent = '✓';
+        keyElement.className = 'key-collected';
+    }
+}
+
+function checkVictoryCondition() {
+    const allKeysCollected = Object.values(STATE.keysCollected).every(collected => collected);
+
+    if (allKeysCollected && !STATE.victoryShown) {
+        STATE.victoryShown = true;
+        const victoryMessage = document.getElementById('victoryMessage');
+        if (victoryMessage) {
+            setTimeout(() => {
+                victoryMessage.classList.add('show');
+            }, 500);
+
+            setTimeout(() => {
+                victoryMessage.classList.remove('show');
+            }, 5000);
+        }
+        console.log('All keys collected! Victory!');
     }
 }
 
@@ -1042,7 +1355,8 @@ function setupAudio() {
             main: 'assets/audio/main.mp3',
             pool: 'assets/audio/pool.mp3',
             hallway: 'assets/audio/hallway.mp3',
-            garden: 'assets/audio/garden.mp3'
+            garden: 'assets/audio/garden.mp3',
+            star: 'assets/audio/star.mp3'
         };
 
         // Note: In production, you would load actual audio buffers here
@@ -1064,6 +1378,137 @@ function playSceneAudio(sceneName) {
 }
 
 // ============================================================================
+// WEBCAM SETUP & MOTION DETECTION
+// ============================================================================
+
+function setupWebcam() {
+    STATE.webcam.video = document.getElementById('webcamVideo');
+    STATE.webcam.canvas = document.getElementById('webcamCanvas');
+    STATE.webcam.context = STATE.webcam.canvas.getContext('2d');
+
+    // Request webcam access (optional - won't break if denied)
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        navigator.mediaDevices.getUserMedia({
+            video: { width: 160, height: 120, facingMode: 'user' }
+        })
+        .then(stream => {
+            STATE.webcam.video.srcObject = stream;
+            STATE.webcam.enabled = true;
+            STATE.webcam.canvas.width = 160;
+            STATE.webcam.canvas.height = 120;
+
+            // Start motion detection loop
+            requestAnimationFrame(detectMotion);
+
+            console.log('Webcam enabled for hand interaction');
+        })
+        .catch(err => {
+            console.log('Webcam not available or denied:', err.message);
+            STATE.webcam.enabled = false;
+        });
+    } else {
+        console.log('getUserMedia not supported');
+        STATE.webcam.enabled = false;
+    }
+}
+
+let previousFrameData = null;
+
+function detectMotion() {
+    if (!STATE.webcam.enabled || !STATE.webcam.video.readyState === 4) {
+        requestAnimationFrame(detectMotion);
+        return;
+    }
+
+    const ctx = STATE.webcam.context;
+    const canvas = STATE.webcam.canvas;
+    const video = STATE.webcam.video;
+
+    // Draw current frame
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const currentFrame = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const currentData = currentFrame.data;
+
+    if (previousFrameData) {
+        let totalMotion = 0;
+        let motionXSum = 0;
+        let motionYSum = 0;
+        let motionCount = 0;
+
+        // Simple motion detection: compare pixel brightness
+        for (let y = 0; y < canvas.height; y += 4) {
+            for (let x = 0; x < canvas.width; x += 4) {
+                const i = (y * canvas.width + x) * 4;
+
+                // Calculate brightness
+                const currentBrightness = (currentData[i] + currentData[i + 1] + currentData[i + 2]) / 3;
+                const previousBrightness = (previousFrameData[i] + previousFrameData[i + 1] + previousFrameData[i + 2]) / 3;
+
+                const diff = Math.abs(currentBrightness - previousBrightness);
+
+                if (diff > 20) { // Threshold for motion
+                    totalMotion += diff;
+                    motionXSum += (x / canvas.width - 0.5) * diff;
+                    motionYSum += (y / canvas.height - 0.5) * diff;
+                    motionCount++;
+                }
+            }
+        }
+
+        if (motionCount > 0) {
+            STATE.webcam.motionX = motionXSum / totalMotion;
+            STATE.webcam.motionY = motionYSum / totalMotion;
+            STATE.webcam.motionStrength = Math.min(totalMotion / 10000, 1.0);
+        } else {
+            STATE.webcam.motionX *= 0.9;
+            STATE.webcam.motionY *= 0.9;
+            STATE.webcam.motionStrength *= 0.9;
+        }
+    }
+
+    previousFrameData = new Uint8ClampedArray(currentData);
+
+    requestAnimationFrame(detectMotion);
+}
+
+function applyHandInteraction() {
+    // Only apply in Star Space
+    if (STATE.currentScene !== 'star' || !STATE.webcam.enabled) return;
+
+    const sceneData = STATE.sceneGroups.star.userData;
+    if (!sceneData.particles) return;
+
+    const motionStrength = STATE.webcam.motionStrength;
+    const motionX = STATE.webcam.motionX;
+    const motionY = STATE.webcam.motionY;
+
+    if (motionStrength > 0.05) {
+        // Show webcam feed when motion is detected
+        STATE.webcam.video.classList.add('active');
+
+        // Apply repulsion force to nearby particles
+        sceneData.particles.forEach(particle => {
+            const distToCamera = particle.position.distanceTo(STATE.camera.position);
+
+            if (distToCamera < 15) {
+                // Calculate repulsion direction based on motion
+                const repelX = motionX * motionStrength * 0.5;
+                const repelY = -motionY * motionStrength * 0.5;
+
+                particle.position.x += repelX;
+                particle.position.y += repelY;
+
+                // Add some random drift
+                particle.position.x += (Math.random() - 0.5) * motionStrength * 0.1;
+                particle.position.z += (Math.random() - 0.5) * motionStrength * 0.1;
+            }
+        });
+    } else {
+        STATE.webcam.video.classList.remove('active');
+    }
+}
+
+// ============================================================================
 // ANIMATION LOOP
 // ============================================================================
 
@@ -1074,6 +1519,7 @@ function animate() {
 
     updateControls();
     updateSceneAnimations();
+    applyHandInteraction();
 
     STATE.renderer.render(STATE.activeScene, STATE.camera);
 }
@@ -1162,6 +1608,53 @@ function updateSceneAnimations() {
             });
         }
     }
+
+    // Star Space - floating particles with orbital motion
+    if (STATE.currentScene === 'star' && userData.particles) {
+        userData.particles.forEach((particle, index) => {
+            const originalPos = particle.userData.originalPos;
+            const phase = particle.userData.phase;
+            const speed = particle.userData.speed;
+            const radius = particle.userData.radius;
+
+            // Orbital motion around original position
+            const angle = STATE.time * speed + phase;
+            const orbitX = Math.cos(angle) * radius;
+            const orbitY = Math.sin(angle * 0.7) * radius * 0.5;
+            const orbitZ = Math.sin(angle) * radius;
+
+            particle.position.x = originalPos.x + orbitX;
+            particle.position.y = originalPos.y + orbitY;
+            particle.position.z = originalPos.z + orbitZ;
+
+            // Gentle pulsing
+            const pulse = Math.sin(STATE.time * 2 + phase) * 0.2 + 0.8;
+            particle.material.emissiveIntensity = 0.8 * pulse;
+        });
+
+        // Animate central key (if not collected)
+        if (userData.centralKey && !userData.centralKey.userData.collected) {
+            userData.centralKey.rotation.y = STATE.time * 0.5;
+            const floatY = Math.sin(STATE.time * 1.5) * 0.15;
+            userData.centralKey.position.y = floatY;
+        }
+    }
+
+    // Animate all keys (floating and rotating)
+    currentGroup.traverse((obj) => {
+        if (obj.userData.isKey && !obj.userData.collected) {
+            obj.rotation.y = STATE.time * 0.8;
+            const baseY = obj.userData.baseY || 1;
+            const floatOffset = Math.sin(STATE.time * 2 + obj.position.x) * 0.1;
+            obj.position.y = baseY + floatOffset;
+
+            // Pulsing glow
+            if (obj.userData.glow) {
+                const pulse = Math.sin(STATE.time * 3) * 0.1 + 0.2;
+                obj.userData.glow.material.opacity = pulse;
+            }
+        }
+    });
 
     // Animate all portal glows (pulsing effect)
     currentGroup.traverse((obj) => {
