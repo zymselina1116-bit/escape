@@ -44,8 +44,16 @@ const STATE = {
         enabled: false,
         motionX: 0,
         motionY: 0,
-        motionStrength: 0
-    }
+        motionStrength: 0,
+        handX: 0,
+        handY: 0,
+        handZ: 0,
+        isPinching: false,
+        pinchStrength: 0
+    },
+    virtualHand: null,
+    grabbedOrb: null,
+    handTrail: []
 };
 
 const CONFIG = {
@@ -890,6 +898,11 @@ function createStarSpace() {
     });
     group.add(returnPortal);
 
+    // Create virtual hand
+    const virtualHand = createVirtualHand();
+    virtualHand.visible = false; // Initially hidden until webcam detects motion
+    group.add(virtualHand);
+
     group.userData = {
         properties: {
             fog: new THREE.FogExp2(0x0c0e26, 0.015),
@@ -897,11 +910,104 @@ function createStarSpace() {
         },
         particles: particles,
         centralKey: centralKey,
+        virtualHand: virtualHand,
         startPosition: new THREE.Vector3(0, CONFIG.cameraHeight, 12),
         startRotation: { yaw: Math.PI, pitch: 0 }
     };
 
     return group;
+}
+
+// ============================================================================
+// VIRTUAL HAND CREATION
+// ============================================================================
+
+function createVirtualHand() {
+    const handGroup = new THREE.Group();
+    handGroup.name = 'virtualHand';
+
+    // Hand material - glowing semi-transparent
+    const handMaterial = new THREE.MeshStandardMaterial({
+        color: 0x99ddff,
+        emissive: 0x99ddff,
+        emissiveIntensity: 0.6,
+        transparent: true,
+        opacity: 0.7,
+        roughness: 0.3,
+        metalness: 0.2
+    });
+
+    // Palm (slightly larger sphere)
+    const palm = new THREE.Mesh(
+        new THREE.SphereGeometry(0.15, 16, 16),
+        handMaterial
+    );
+    handGroup.add(palm);
+
+    // Glow around palm
+    const palmGlow = new THREE.Mesh(
+        new THREE.SphereGeometry(0.25, 16, 16),
+        new THREE.MeshBasicMaterial({
+            color: 0x99ddff,
+            transparent: true,
+            opacity: 0.2
+        })
+    );
+    handGroup.add(palmGlow);
+
+    // Create 5 fingers
+    const fingers = [];
+    const fingerConfigs = [
+        // Thumb
+        { angle: -0.6, length: 0.5, joints: 2 },
+        // Index
+        { angle: -0.3, length: 0.7, joints: 3 },
+        // Middle
+        { angle: 0, length: 0.8, joints: 3 },
+        // Ring
+        { angle: 0.3, length: 0.7, joints: 3 },
+        // Pinky
+        { angle: 0.6, length: 0.6, joints: 3 }
+    ];
+
+    fingerConfigs.forEach((config, fingerIndex) => {
+        const finger = [];
+
+        for (let i = 0; i < config.joints; i++) {
+            const jointSize = 0.08 - (i * 0.015);
+            const joint = new THREE.Mesh(
+                new THREE.SphereGeometry(jointSize, 12, 12),
+                handMaterial.clone()
+            );
+
+            // Position joints along finger
+            const distance = 0.15 + (i * 0.22);
+            const x = Math.sin(config.angle) * distance;
+            const y = Math.cos(config.angle) * distance;
+
+            joint.position.set(x, y, 0);
+
+            // Store original position for animation
+            joint.userData.originalPos = joint.position.clone();
+            joint.userData.fingerIndex = fingerIndex;
+            joint.userData.jointIndex = i;
+
+            handGroup.add(joint);
+            finger.push(joint);
+        }
+
+        fingers.push(finger);
+    });
+
+    handGroup.userData = {
+        palm: palm,
+        palmGlow: palmGlow,
+        fingers: fingers,
+        isPinching: false,
+        pinchAmount: 0
+    };
+
+    return handGroup;
 }
 
 // ============================================================================
@@ -1434,8 +1540,10 @@ function detectMotion() {
         let motionXSum = 0;
         let motionYSum = 0;
         let motionCount = 0;
+        let brightSpots = 0;
+        let darkSpots = 0;
 
-        // Simple motion detection: compare pixel brightness
+        // Motion detection with brightness tracking
         for (let y = 0; y < canvas.height; y += 4) {
             for (let x = 0; x < canvas.width; x += 4) {
                 const i = (y * canvas.width + x) * 4;
@@ -1451,18 +1559,55 @@ function detectMotion() {
                     motionXSum += (x / canvas.width - 0.5) * diff;
                     motionYSum += (y / canvas.height - 0.5) * diff;
                     motionCount++;
+
+                    // Track brightness for pinch detection
+                    if (currentBrightness > 150) brightSpots++;
+                    if (currentBrightness < 100) darkSpots++;
                 }
             }
         }
 
         if (motionCount > 0) {
+            // Overall hand position
             STATE.webcam.motionX = motionXSum / totalMotion;
             STATE.webcam.motionY = motionYSum / totalMotion;
             STATE.webcam.motionStrength = Math.min(totalMotion / 10000, 1.0);
+
+            // Smooth hand position for virtual hand
+            const targetX = STATE.webcam.motionX * 8;
+            const targetY = -STATE.webcam.motionY * 6;
+            const targetZ = STATE.webcam.motionStrength * -5;
+
+            STATE.webcam.handX += (targetX - STATE.webcam.handX) * 0.15;
+            STATE.webcam.handY += (targetY - STATE.webcam.handY) * 0.15;
+            STATE.webcam.handZ += (targetZ - STATE.webcam.handZ) * 0.15;
+
+            // Pinch detection: high motion density in small area = pinch
+            const motionDensity = motionCount / ((canvas.width * canvas.height) / 16);
+            const brightnessFocus = brightSpots / Math.max(1, motionCount);
+
+            // Pinch occurs when motion is concentrated and has brightness variation
+            const pinchThreshold = 0.15;
+            const newPinchState = motionDensity > pinchThreshold && brightnessFocus > 0.3;
+
+            if (newPinchState && !STATE.webcam.isPinching) {
+                STATE.webcam.isPinching = true;
+                STATE.webcam.pinchStrength = 1.0;
+            } else if (!newPinchState && STATE.webcam.isPinching) {
+                STATE.webcam.isPinching = false;
+            }
+
+            // Smooth pinch strength
+            if (STATE.webcam.isPinching) {
+                STATE.webcam.pinchStrength = Math.min(1.0, STATE.webcam.pinchStrength + 0.1);
+            } else {
+                STATE.webcam.pinchStrength = Math.max(0.0, STATE.webcam.pinchStrength - 0.1);
+            }
         } else {
             STATE.webcam.motionX *= 0.9;
             STATE.webcam.motionY *= 0.9;
             STATE.webcam.motionStrength *= 0.9;
+            STATE.webcam.pinchStrength *= 0.95;
         }
     }
 
@@ -1476,36 +1621,177 @@ function applyHandInteraction() {
     if (STATE.currentScene !== 'star' || !STATE.webcam.enabled) return;
 
     const sceneData = STATE.sceneGroups.star.userData;
-    if (!sceneData.particles) return;
+    if (!sceneData.particles || !sceneData.virtualHand) return;
 
+    const virtualHand = sceneData.virtualHand;
     const motionStrength = STATE.webcam.motionStrength;
-    const motionX = STATE.webcam.motionX;
-    const motionY = STATE.webcam.motionY;
 
+    // Show/hide virtual hand based on motion
     if (motionStrength > 0.05) {
-        // Show webcam feed when motion is detected
+        virtualHand.visible = true;
         STATE.webcam.video.classList.add('active');
 
-        // Apply repulsion force to nearby particles
-        sceneData.particles.forEach(particle => {
-            const distToCamera = particle.position.distanceTo(STATE.camera.position);
+        // Update hand position in world space
+        const handWorldPos = new THREE.Vector3(
+            STATE.camera.position.x + STATE.webcam.handX,
+            STATE.camera.position.y + STATE.webcam.handY,
+            STATE.camera.position.z + STATE.webcam.handZ - 3
+        );
 
-            if (distToCamera < 15) {
-                // Calculate repulsion direction based on motion
-                const repelX = motionX * motionStrength * 0.5;
-                const repelY = -motionY * motionStrength * 0.5;
+        virtualHand.position.lerp(handWorldPos, 0.2);
 
-                particle.position.x += repelX;
-                particle.position.y += repelY;
+        // Make hand face camera
+        virtualHand.lookAt(STATE.camera.position);
 
-                // Add some random drift
-                particle.position.x += (Math.random() - 0.5) * motionStrength * 0.1;
-                particle.position.z += (Math.random() - 0.5) * motionStrength * 0.1;
+        // Animate fingers for pinch
+        animateHandPinch(virtualHand, STATE.webcam.pinchStrength);
+
+        // Update palm glow based on motion
+        if (virtualHand.userData.palmGlow) {
+            const pulse = Math.sin(STATE.time * 4) * 0.1 + 0.3;
+            virtualHand.userData.palmGlow.material.opacity = pulse * motionStrength;
+        }
+
+        // Create light trail
+        createHandTrail(virtualHand.position.clone());
+
+        // Handle orb grabbing
+        if (STATE.webcam.isPinching && !STATE.grabbedOrb) {
+            // Try to grab nearest orb
+            const nearestOrb = findNearestOrb(virtualHand.position, sceneData.particles);
+            if (nearestOrb && nearestOrb.distance < 2.0) {
+                STATE.grabbedOrb = nearestOrb.orb;
+                STATE.grabbedOrb.userData.grabbed = true;
+            }
+        } else if (!STATE.webcam.isPinching && STATE.grabbedOrb) {
+            // Release orb
+            STATE.grabbedOrb.userData.grabbed = false;
+            STATE.grabbedOrb.userData.releaseVelocity = new THREE.Vector3(
+                (Math.random() - 0.5) * 0.1,
+                (Math.random() - 0.5) * 0.1,
+                (Math.random() - 0.5) * 0.1
+            );
+            STATE.grabbedOrb = null;
+        }
+
+        // Update grabbed orb position
+        if (STATE.grabbedOrb) {
+            const targetPos = virtualHand.position.clone();
+            targetPos.x += Math.sin(STATE.time * 3) * 0.1;
+            targetPos.y += Math.cos(STATE.time * 3) * 0.1;
+            STATE.grabbedOrb.position.lerp(targetPos, 0.3);
+        }
+
+    } else {
+        virtualHand.visible = false;
+        STATE.webcam.video.classList.remove('active');
+
+        // Release any grabbed orb
+        if (STATE.grabbedOrb) {
+            STATE.grabbedOrb.userData.grabbed = false;
+            STATE.grabbedOrb = null;
+        }
+    }
+
+    // Update trail particles
+    updateHandTrail();
+}
+
+function animateHandPinch(handGroup, pinchAmount) {
+    const fingers = handGroup.userData.fingers;
+    if (!fingers) return;
+
+    fingers.forEach((finger, fingerIndex) => {
+        finger.forEach((joint, jointIndex) => {
+            const originalPos = joint.userData.originalPos;
+
+            // Curl fingers inward when pinching
+            const curlAmount = pinchAmount * (jointIndex + 1) * 0.15;
+            const targetX = originalPos.x * (1 - curlAmount);
+            const targetY = originalPos.y * (1 - curlAmount * 0.5);
+
+            joint.position.x = THREE.MathUtils.lerp(joint.position.x, targetX, 0.2);
+            joint.position.y = THREE.MathUtils.lerp(joint.position.y, targetY, 0.2);
+
+            // Enhance glow when pinching
+            if (joint.material) {
+                joint.material.emissiveIntensity = 0.6 + pinchAmount * 0.4;
+                joint.material.opacity = 0.7 + pinchAmount * 0.2;
             }
         });
-    } else {
-        STATE.webcam.video.classList.remove('active');
+    });
+}
+
+function findNearestOrb(position, particles) {
+    let nearest = null;
+    let minDistance = Infinity;
+
+    particles.forEach(particle => {
+        if (particle.userData.grabbed) return;
+
+        const dist = particle.position.distanceTo(position);
+        if (dist < minDistance) {
+            minDistance = dist;
+            nearest = particle;
+        }
+    });
+
+    return nearest ? { orb: nearest, distance: minDistance } : null;
+}
+
+function createHandTrail(position) {
+    // Add new trail point
+    STATE.handTrail.push({
+        position: position.clone(),
+        life: 1.0,
+        mesh: null
+    });
+
+    // Limit trail length
+    if (STATE.handTrail.length > 20) {
+        const old = STATE.handTrail.shift();
+        if (old.mesh && old.mesh.parent) {
+            old.mesh.parent.remove(old.mesh);
+        }
     }
+
+    // Create trail meshes in Star Space scene
+    if (STATE.currentScene === 'star' && STATE.sceneGroups.star) {
+        const lastPoint = STATE.handTrail[STATE.handTrail.length - 1];
+        if (!lastPoint.mesh) {
+            const trailSphere = new THREE.Mesh(
+                new THREE.SphereGeometry(0.08, 8, 8),
+                new THREE.MeshBasicMaterial({
+                    color: 0x99ddff,
+                    transparent: true,
+                    opacity: 0.6
+                })
+            );
+            trailSphere.position.copy(position);
+            STATE.sceneGroups.star.add(trailSphere);
+            lastPoint.mesh = trailSphere;
+        }
+    }
+}
+
+function updateHandTrail() {
+    // Fade out and remove old trail points
+    STATE.handTrail.forEach((point, index) => {
+        point.life -= 0.05;
+
+        if (point.mesh) {
+            point.mesh.material.opacity = point.life * 0.6;
+            point.mesh.scale.setScalar(point.life);
+
+            if (point.life <= 0 && point.mesh.parent) {
+                point.mesh.parent.remove(point.mesh);
+                point.mesh = null;
+            }
+        }
+    });
+
+    // Remove dead trail points
+    STATE.handTrail = STATE.handTrail.filter(point => point.life > 0);
 }
 
 // ============================================================================
@@ -1612,6 +1898,32 @@ function updateSceneAnimations() {
     // Star Space - floating particles with orbital motion
     if (STATE.currentScene === 'star' && userData.particles) {
         userData.particles.forEach((particle, index) => {
+            // Skip grabbed orbs - they're controlled by hand
+            if (particle.userData.grabbed) {
+                // Make grabbed orb glow brighter
+                particle.material.emissiveIntensity = 1.2;
+                particle.material.opacity = 1.0;
+                return;
+            }
+
+            // Handle released orbs with velocity
+            if (particle.userData.releaseVelocity) {
+                particle.position.add(particle.userData.releaseVelocity);
+                particle.userData.releaseVelocity.multiplyScalar(0.95); // Decay
+
+                // Remove velocity when nearly stopped
+                if (particle.userData.releaseVelocity.length() < 0.01) {
+                    delete particle.userData.releaseVelocity;
+                    // Set new original position
+                    particle.userData.originalPos = particle.position.clone();
+                }
+
+                // Restore normal appearance
+                particle.material.emissiveIntensity = 0.8;
+                particle.material.opacity = 0.8;
+                return;
+            }
+
             const originalPos = particle.userData.originalPos;
             const phase = particle.userData.phase;
             const speed = particle.userData.speed;
@@ -1630,6 +1942,7 @@ function updateSceneAnimations() {
             // Gentle pulsing
             const pulse = Math.sin(STATE.time * 2 + phase) * 0.2 + 0.8;
             particle.material.emissiveIntensity = 0.8 * pulse;
+            particle.material.opacity = 0.8;
         });
 
         // Animate central key (if not collected)
