@@ -1,8 +1,10 @@
-// The Bright Escape - Dreamcore 3D Exploration
-// A calm, atmospheric journey through interconnected surreal worlds
+// ============================================================================
+// THE BRIGHT ESCAPE - DREAMCORE 3D EXPLORATION
+// A calm, surreal journey through luminous architectural spaces
+// ============================================================================
 
 // ============================================================================
-// GLOBAL STATE & CONFIGURATION
+// GLOBAL STATE
 // ============================================================================
 
 const STATE = {
@@ -11,24 +13,40 @@ const STATE = {
     time: 0,
     camera: null,
     renderer: null,
-    scenes: {},
+    sceneGroups: {},
+    activeScene: null,
     audioContext: null,
-    audioTracks: {},
-    currentAudio: null,
+    audioBuffers: {},
+    audioSources: {},
+    currentAudioSource: null,
     keys: {},
-    mouse: { x: 0, y: 0, dx: 0, dy: 0 },
-    pointerLocked: false,
-    velocity: { x: 0, y: 0, z: 0 },
-    cameraRotation: { yaw: 0, pitch: 0 }
+    mouse: {
+        down: false,
+        x: 0,
+        y: 0,
+        lastX: 0,
+        lastY: 0
+    },
+    cameraRotation: { yaw: 0, pitch: 0 },
+    raycaster: new THREE.Raycaster(),
+    mouseVector: new THREE.Vector2()
 };
 
 const CONFIG = {
-    moveSpeed: 0.05,
-    lookSpeed: 0.002,
-    zoomSpeed: 0.005,
+    moveSpeed: 0.08,
+    lookSpeed: 0.003,
     cameraHeight: 1.6,
     floatAmplitude: 0.05,
-    floatSpeed: 0.2
+    floatSpeed: 0.2,
+    transitionDuration: 800
+};
+
+// Scene labels for UI
+const SCENE_LABELS = {
+    main: 'Main Room',
+    pool: 'Pool Tunnel',
+    hallway: 'Hallway',
+    garden: 'Garden'
 };
 
 // ============================================================================
@@ -46,20 +64,28 @@ function init() {
 
 function setupRenderer() {
     const container = document.getElementById('gameContainer');
-    STATE.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    STATE.renderer = new THREE.WebGLRenderer({
+        antialias: true,
+        alpha: false,
+        powerPreference: 'high-performance'
+    });
     STATE.renderer.setSize(window.innerWidth, window.innerHeight);
+    STATE.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     STATE.renderer.shadowMap.enabled = true;
     STATE.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     STATE.renderer.outputEncoding = THREE.sRGBEncoding;
     STATE.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    STATE.renderer.toneMappingExposure = 1.0;
+    STATE.renderer.toneMappingExposure = 1.1;
+    STATE.renderer.physicallyCorrectLights = true;
     container.appendChild(STATE.renderer.domElement);
 
-    window.addEventListener('resize', () => {
-        STATE.camera.aspect = window.innerWidth / window.innerHeight;
-        STATE.camera.updateProjectionMatrix();
-        STATE.renderer.setSize(window.innerWidth, window.innerHeight);
-    });
+    window.addEventListener('resize', onWindowResize);
+}
+
+function onWindowResize() {
+    STATE.camera.aspect = window.innerWidth / window.innerHeight;
+    STATE.camera.updateProjectionMatrix();
+    STATE.renderer.setSize(window.innerWidth, window.innerHeight);
 }
 
 function setupCamera() {
@@ -67,543 +93,614 @@ function setupCamera() {
         75,
         window.innerWidth / window.innerHeight,
         0.1,
-        1000
+        500
     );
     STATE.camera.position.set(0, CONFIG.cameraHeight, 10);
     STATE.camera.lookAt(0, 1.5, 0);
 }
 
 // ============================================================================
-// SCENE CREATION
+// SCENE SETUP
 // ============================================================================
 
 function setupScenes() {
-    STATE.scenes.main = createMainRoom();
-    STATE.scenes.pool = createPoolTunnel();
-    STATE.scenes.hallway = createHallway();
-    STATE.scenes.garden = createGarden();
+    // Create main scene container
+    STATE.activeScene = new THREE.Scene();
+
+    // Create scene groups
+    STATE.sceneGroups.main = createMainRoom();
+    STATE.sceneGroups.pool = createPoolTunnel();
+    STATE.sceneGroups.hallway = createHallway();
+    STATE.sceneGroups.garden = createGarden();
+
+    // Add main room to scene initially
+    STATE.activeScene.add(STATE.sceneGroups.main);
+
+    // Set initial scene properties
+    applySceneProperties('main');
 }
 
-// ----------------------------------------------------------------------------
+function applySceneProperties(sceneName) {
+    const sceneGroup = STATE.sceneGroups[sceneName];
+    if (!sceneGroup || !sceneGroup.userData.properties) return;
+
+    const props = sceneGroup.userData.properties;
+
+    // Apply fog
+    if (props.fog) {
+        STATE.activeScene.fog = props.fog;
+    }
+
+    // Apply background
+    if (props.background) {
+        STATE.activeScene.background = props.background;
+    }
+}
+
+// ============================================================================
 // MAIN ROOM - European Dream Hub
-// ----------------------------------------------------------------------------
+// ============================================================================
 
 function createMainRoom() {
-    const scene = new THREE.Scene();
-    scene.fog = new THREE.FogExp2(0xf3e9da, 0.015);
-    scene.background = new THREE.Color(0xf3e9da);
+    const group = new THREE.Group();
+    group.name = 'main';
 
     // Lighting
-    const sunlight = new THREE.DirectionalLight(0xfff6e0, 1.1);
-    sunlight.position.set(20, 30, 15);
+    const sunlight = new THREE.DirectionalLight(0xfff4d6, 1.2);
+    sunlight.position.set(30, 40, 20);
     sunlight.castShadow = true;
-    sunlight.shadow.camera.left = -20;
-    sunlight.shadow.camera.right = 20;
-    sunlight.shadow.camera.top = 20;
-    sunlight.shadow.camera.bottom = -20;
-    scene.add(sunlight);
+    sunlight.shadow.mapSize.width = 2048;
+    sunlight.shadow.mapSize.height = 2048;
+    sunlight.shadow.camera.left = -30;
+    sunlight.shadow.camera.right = 30;
+    sunlight.shadow.camera.top = 30;
+    sunlight.shadow.camera.bottom = -30;
+    sunlight.shadow.camera.far = 100;
+    group.add(sunlight);
 
-    const ambient = new THREE.HemisphereLight(0xfff3d8, 0xcbbf9e, 0.7);
-    scene.add(ambient);
+    const hemisphereLight = new THREE.HemisphereLight(0xfff6d8, 0xd8c6a8, 0.9);
+    group.add(hemisphereLight);
 
-    // Floor - Polished wood
-    const floorGeometry = new THREE.PlaneGeometry(20, 20);
+    // Floor - Polished wood with high reflectivity
+    const floorGeometry = new THREE.PlaneGeometry(24, 24);
     const floorMaterial = new THREE.MeshStandardMaterial({
-        color: 0xb48a64,
-        roughness: 0.4,
-        metalness: 0.1
+        color: 0xb58a64,
+        roughness: 0.3,
+        metalness: 0.4,
+        envMapIntensity: 1.0
     });
     const floor = new THREE.Mesh(floorGeometry, floorMaterial);
     floor.rotation.x = -Math.PI / 2;
     floor.receiveShadow = true;
-    scene.add(floor);
+    group.add(floor);
 
     // Ceiling
-    const ceilingGeometry = new THREE.PlaneGeometry(20, 20);
+    const ceilingGeometry = new THREE.PlaneGeometry(24, 24);
     const ceilingMaterial = new THREE.MeshStandardMaterial({
         color: 0xffffff,
         roughness: 1.0,
         side: THREE.DoubleSide
     });
     const ceiling = new THREE.Mesh(ceilingGeometry, ceilingMaterial);
-    ceiling.position.y = 12;
+    ceiling.position.y = 14;
     ceiling.rotation.x = Math.PI / 2;
-    scene.add(ceiling);
+    ceiling.receiveShadow = true;
+    group.add(ceiling);
 
-    // Walls
+    // Walls - Soft cream with slight reflectivity
     const wallMaterial = new THREE.MeshStandardMaterial({
-        color: 0xf3e9da,
-        roughness: 0.9
+        color: 0xf3ede0,
+        roughness: 0.8,
+        metalness: 0.2
     });
 
     // Back wall
     const backWall = new THREE.Mesh(
-        new THREE.BoxGeometry(20, 12, 0.2),
+        new THREE.BoxGeometry(24, 14, 0.3),
         wallMaterial
     );
-    backWall.position.set(0, 6, -10);
+    backWall.position.set(0, 7, -12);
     backWall.receiveShadow = true;
-    scene.add(backWall);
+    backWall.castShadow = true;
+    group.add(backWall);
 
     // Left wall
     const leftWall = new THREE.Mesh(
-        new THREE.BoxGeometry(0.2, 12, 20),
+        new THREE.BoxGeometry(0.3, 14, 24),
         wallMaterial
     );
-    leftWall.position.set(-10, 6, 0);
+    leftWall.position.set(-12, 7, 0);
     leftWall.receiveShadow = true;
-    scene.add(leftWall);
+    leftWall.castShadow = true;
+    group.add(leftWall);
 
     // Right wall
     const rightWall = new THREE.Mesh(
-        new THREE.BoxGeometry(0.2, 12, 20),
+        new THREE.BoxGeometry(0.3, 14, 24),
         wallMaterial
     );
-    rightWall.position.set(10, 6, 0);
+    rightWall.position.set(12, 7, 0);
     rightWall.receiveShadow = true;
-    scene.add(rightWall);
+    rightWall.castShadow = true;
+    group.add(rightWall);
 
-    // Front wall (with opening)
+    // Front walls (with gap)
     const frontWallLeft = new THREE.Mesh(
-        new THREE.BoxGeometry(8, 12, 0.2),
+        new THREE.BoxGeometry(9, 14, 0.3),
         wallMaterial
     );
-    frontWallLeft.position.set(-6, 6, 10);
-    scene.add(frontWallLeft);
+    frontWallLeft.position.set(-7.5, 7, 12);
+    frontWallLeft.receiveShadow = true;
+    group.add(frontWallLeft);
 
     const frontWallRight = new THREE.Mesh(
-        new THREE.BoxGeometry(8, 12, 0.2),
+        new THREE.BoxGeometry(9, 14, 0.3),
         wallMaterial
     );
-    frontWallRight.position.set(6, 6, 10);
-    scene.add(frontWallRight);
+    frontWallRight.position.set(7.5, 7, 12);
+    frontWallRight.receiveShadow = true;
+    group.add(frontWallRight);
 
-    // Wooden desk
-    const deskGroup = new THREE.Group();
-    const deskTop = new THREE.Mesh(
-        new THREE.BoxGeometry(2, 0.1, 1),
-        new THREE.MeshStandardMaterial({ color: 0x8b5a3c, roughness: 0.6 })
-    );
-    deskTop.position.y = 0.8;
-    deskTop.castShadow = true;
-    deskGroup.add(deskTop);
-
-    const legGeometry = new THREE.BoxGeometry(0.1, 0.8, 0.1);
-    const legMaterial = new THREE.MeshStandardMaterial({ color: 0x6b4423, roughness: 0.7 });
-
-    const positions = [[-0.9, 0.4, -0.4], [0.9, 0.4, -0.4], [-0.9, 0.4, 0.4], [0.9, 0.4, 0.4]];
-    positions.forEach(pos => {
-        const leg = new THREE.Mesh(legGeometry, legMaterial);
-        leg.position.set(...pos);
-        leg.castShadow = true;
-        deskGroup.add(leg);
-    });
-
-    deskGroup.position.set(-2, 0, -3);
-    scene.add(deskGroup);
-
-    // Floating dust particles
+    // Dust particles
     const dustParticles = [];
-    for (let i = 0; i < 50; i++) {
+    for (let i = 0; i < 60; i++) {
         const particle = new THREE.Mesh(
-            new THREE.SphereGeometry(0.02, 8, 8),
+            new THREE.SphereGeometry(0.015, 6, 6),
             new THREE.MeshBasicMaterial({
                 color: 0xffffff,
                 transparent: true,
-                opacity: 0.3
+                opacity: 0.4
             })
         );
         particle.position.set(
-            Math.random() * 18 - 9,
-            Math.random() * 10 + 1,
-            Math.random() * 18 - 9
+            Math.random() * 20 - 10,
+            Math.random() * 12 + 1,
+            Math.random() * 20 - 10
         );
         particle.userData.velocity = {
-            x: (Math.random() - 0.5) * 0.002,
-            y: (Math.random() - 0.5) * 0.002,
-            z: (Math.random() - 0.5) * 0.002
+            x: (Math.random() - 0.5) * 0.003,
+            y: (Math.random() - 0.3) * 0.002,
+            z: (Math.random() - 0.5) * 0.003
         };
         dustParticles.push(particle);
-        scene.add(particle);
+        group.add(particle);
     }
 
     // Portal A - Wooden double door to Hallway
-    const doorA = createPortal({
-        position: [0, 0, -9],
-        width: 2.5,
-        height: 4,
-        depth: 0.2,
-        color: 0x8b5a3c,
-        emissiveColor: 0xffd8a8,
-        emissiveIntensity: 0.3,
-        destination: 'hallway'
+    const portalA = createPortal({
+        type: 'door',
+        position: [0, 0, -10],
+        size: [2.5, 4.5, 0.25],
+        color: 0x9b6f4a,
+        emissive: 0xffd6a1,
+        emissiveIntensity: 0.4,
+        target: 'hallway'
     });
-    scene.add(doorA);
+    group.add(portalA);
 
     // Portal B - Glass door to Pool
-    const doorB = createPortal({
-        position: [7, 0, -5],
-        width: 2,
-        height: 3.5,
-        depth: 0.1,
-        color: 0x88ccdd,
-        emissiveColor: 0xaef7ff,
-        emissiveIntensity: 0.4,
-        destination: 'pool',
-        transparent: true,
-        opacity: 0.5
-    });
-    scene.add(doorB);
-
-    // Window portal to Garden
-    const windowPortal = createPortal({
-        position: [-7, 2, -5],
-        width: 1.5,
-        height: 3,
-        depth: 0.1,
-        color: 0xaaddaa,
-        emissiveColor: 0xcaffd0,
-        emissiveIntensity: 0.4,
-        destination: 'garden',
+    const portalB = createPortal({
+        type: 'glass',
+        position: [8, 0, -6],
+        size: [2, 4, 0.15],
+        color: 0x88ccee,
+        emissive: 0xaef7ff,
+        emissiveIntensity: 0.5,
+        target: 'pool',
         transparent: true,
         opacity: 0.6
     });
-    scene.add(windowPortal);
+    group.add(portalB);
 
-    scene.userData = {
+    // Window portal to Garden
+    const windowPortal = createPortal({
+        type: 'window',
+        position: [-8, 2, -6],
+        size: [1.8, 3.5, 0.12],
+        color: 0x99ddaa,
+        emissive: 0xb9ffd0,
+        emissiveIntensity: 0.45,
+        target: 'garden',
+        transparent: true,
+        opacity: 0.65
+    });
+    group.add(windowPortal);
+
+    // Store scene properties
+    group.userData = {
+        properties: {
+            fog: new THREE.FogExp2(0xf6eed9, 0.008),
+            background: new THREE.Color(0xf6eed9)
+        },
         dustParticles: dustParticles,
-        startPosition: { x: 0, y: CONFIG.cameraHeight, z: 10 },
+        startPosition: new THREE.Vector3(0, CONFIG.cameraHeight, 10),
         startRotation: { yaw: 0, pitch: 0 }
     };
 
-    return scene;
+    return group;
 }
 
-// ----------------------------------------------------------------------------
+// ============================================================================
 // POOL TUNNEL
-// ----------------------------------------------------------------------------
+// ============================================================================
 
 function createPoolTunnel() {
-    const scene = new THREE.Scene();
-    scene.fog = new THREE.FogExp2(0xdff8ee, 0.02);
-    scene.background = new THREE.Color(0xdff8ee);
+    const group = new THREE.Group();
+    group.name = 'pool';
 
     // Lighting
-    const directional = new THREE.DirectionalLight(0xd5fff8, 1.2);
-    directional.position.set(0, 8, -10);
-    scene.add(directional);
+    const mainLight = new THREE.DirectionalLight(0xb6faff, 1.3);
+    mainLight.position.set(0, 15, -10);
+    mainLight.castShadow = true;
+    group.add(mainLight);
 
-    const ambient = new THREE.HemisphereLight(0xd0fff0, 0xa0c5b0, 0.6);
-    scene.add(ambient);
+    const ambientLight = new THREE.AmbientLight(0xa0e5e0, 0.6);
+    group.add(ambientLight);
 
-    // Water floor with ripple effect
-    const waterGeometry = new THREE.PlaneGeometry(20, 60, 50, 150);
+    // Water floor with vertex displacement
+    const waterGeometry = new THREE.PlaneGeometry(16, 60, 80, 240);
     const waterMaterial = new THREE.MeshStandardMaterial({
-        color: 0x9fe5c5,
-        transparent: true,
-        opacity: 0.8,
+        color: 0xa5e2c8,
         roughness: 0.15,
-        metalness: 0.2
+        metalness: 0.5,
+        transparent: true,
+        opacity: 0.85,
+        envMapIntensity: 1.2
     });
     const water = new THREE.Mesh(waterGeometry, waterMaterial);
     water.rotation.x = -Math.PI / 2;
-    water.position.z = -30;
+    water.position.set(0, 0.05, -30);
     water.receiveShadow = true;
-    scene.add(water);
 
-    // Tiled walls
-    const wallMaterial = new THREE.MeshStandardMaterial({
-        color: 0xffffff,
-        roughness: 0.3,
-        metalness: 0.1
-    });
+    // Store original positions for wave animation
+    const positions = waterGeometry.attributes.position;
+    const originalPositions = new Float32Array(positions.count * 3);
+    for (let i = 0; i < positions.count; i++) {
+        originalPositions[i * 3] = positions.getX(i);
+        originalPositions[i * 3 + 1] = positions.getY(i);
+        originalPositions[i * 3 + 2] = positions.getZ(i);
+    }
+    water.userData.originalPositions = originalPositions;
+
+    group.add(water);
 
     // Circular tunnel walls with arches
-    const segments = 32;
-    const radius = 10;
-    const length = 60;
+    const radius = 8;
+    const wallMaterial = new THREE.MeshStandardMaterial({
+        color: 0xa5e2c8,
+        roughness: 0.3,
+        metalness: 0.2
+    });
 
-    for (let z = 0; z < length; z += 10) {
-        // Create arch
-        const archGroup = new THREE.Group();
-
-        for (let i = 0; i < segments; i++) {
-            const angle = (i / segments) * Math.PI;
+    for (let z = 0; z < 60; z += 10) {
+        // Create circular arch
+        const segments = 24;
+        for (let i = 0; i <= segments / 2; i++) {
+            const angle = (i / segments) * Math.PI * 2;
             const x = Math.cos(angle) * radius;
             const y = Math.sin(angle) * radius;
 
-            const tile = new THREE.Mesh(
-                new THREE.BoxGeometry(0.8, 0.8, 10),
+            if (y > 0) { // Only upper half
+                const tile = new THREE.Mesh(
+                    new THREE.BoxGeometry(1.2, 1.2, 9.5),
+                    wallMaterial
+                );
+                tile.position.set(x, y, -z);
+                const lookAngle = Math.atan2(x, y);
+                tile.rotation.z = -lookAngle;
+                tile.receiveShadow = true;
+                tile.castShadow = true;
+                group.add(tile);
+            }
+        }
+
+        // Floor sides
+        for (let side = -1; side <= 1; side += 2) {
+            const sideTile = new THREE.Mesh(
+                new THREE.BoxGeometry(0.8, 2, 9.5),
                 wallMaterial
             );
-            tile.position.set(x, y, -z);
-            tile.lookAt(0, y, -z);
-            tile.receiveShadow = true;
-            scene.add(tile);
+            sideTile.position.set(radius * side, 1, -z);
+            sideTile.receiveShadow = true;
+            group.add(sideTile);
         }
     }
 
     // Return portal
     const returnPortal = createPortal({
-        position: [0, 1.5, 25],
-        width: 2.5,
-        height: 4,
-        depth: 0.2,
-        color: 0xffffff,
-        emissiveColor: 0xf5fff8,
-        emissiveIntensity: 0.5,
-        destination: 'main',
-        isCircular: true
+        type: 'circular',
+        position: [0, 2, 25],
+        size: [3, 3, 0.2],
+        color: 0xeeffff,
+        emissive: 0xf7fff5,
+        emissiveIntensity: 0.6,
+        target: 'main'
     });
-    scene.add(returnPortal);
+    group.add(returnPortal);
 
-    scene.userData = {
+    group.userData = {
+        properties: {
+            fog: new THREE.FogExp2(0xe0faf2, 0.015),
+            background: new THREE.Color(0xe0faf2)
+        },
         water: water,
         waterGeometry: waterGeometry,
-        startPosition: { x: 0, y: CONFIG.cameraHeight, z: 20 },
+        startPosition: new THREE.Vector3(0, CONFIG.cameraHeight, 20),
         startRotation: { yaw: Math.PI, pitch: 0 }
     };
 
-    return scene;
+    return group;
 }
 
-// ----------------------------------------------------------------------------
+// ============================================================================
 // HALLWAY
-// ----------------------------------------------------------------------------
+// ============================================================================
 
 function createHallway() {
-    const scene = new THREE.Scene();
-    scene.fog = new THREE.FogExp2(0x181818, 0.04);
-    scene.background = new THREE.Color(0x181818);
+    const group = new THREE.Group();
+    group.name = 'hallway';
 
-    // Ambient light
-    const ambient = new THREE.AmbientLight(0x443322, 0.4);
-    scene.add(ambient);
+    // Ambient lighting
+    const ambientLight = new THREE.AmbientLight(0x442211, 0.3);
+    group.add(ambientLight);
 
-    // Floor - dark stone
+    // Floor - Dark reflective stone
+    const floorGeometry = new THREE.PlaneGeometry(10, 80);
     const floorMaterial = new THREE.MeshStandardMaterial({
-        color: 0x2d2b29,
+        color: 0x2b2926,
         roughness: 0.4,
-        metalness: 0.1
+        metalness: 0.3,
+        envMapIntensity: 0.5
     });
-    const floor = new THREE.Mesh(
-        new THREE.PlaneGeometry(10, 80),
-        floorMaterial
-    );
+    const floor = new THREE.Mesh(floorGeometry, floorMaterial);
     floor.rotation.x = -Math.PI / 2;
     floor.position.z = -40;
     floor.receiveShadow = true;
-    scene.add(floor);
+    group.add(floor);
 
     // Ceiling
+    const ceilingMaterial = new THREE.MeshStandardMaterial({
+        color: 0x1a1816,
+        roughness: 0.9
+    });
     const ceiling = new THREE.Mesh(
         new THREE.PlaneGeometry(10, 80),
-        new THREE.MeshStandardMaterial({ color: 0x1a1816, roughness: 0.9 })
+        ceilingMaterial
     );
     ceiling.rotation.x = Math.PI / 2;
     ceiling.position.set(0, 8, -40);
-    scene.add(ceiling);
+    group.add(ceiling);
 
     // Walls and arches
     const wallMaterial = new THREE.MeshStandardMaterial({
-        color: 0x3a3836,
-        roughness: 0.6,
+        color: 0x3a3430,
+        roughness: 0.7,
         metalness: 0.1
     });
+
+    const lamps = [];
 
     for (let z = 0; z < 80; z += 6) {
         // Left wall segment
         const leftWall = new THREE.Mesh(
-            new THREE.BoxGeometry(0.3, 8, 5),
+            new THREE.BoxGeometry(0.4, 8, 5.5),
             wallMaterial
         );
         leftWall.position.set(-5, 4, -z);
         leftWall.receiveShadow = true;
-        scene.add(leftWall);
+        leftWall.castShadow = true;
+        group.add(leftWall);
 
         // Right wall segment
         const rightWall = new THREE.Mesh(
-            new THREE.BoxGeometry(0.3, 8, 5),
+            new THREE.BoxGeometry(0.4, 8, 5.5),
             wallMaterial
         );
         rightWall.position.set(5, 4, -z);
         rightWall.receiveShadow = true;
-        scene.add(rightWall);
+        rightWall.castShadow = true;
+        group.add(rightWall);
 
         // Arch top
-        if (z % 6 === 0) {
-            const arch = new THREE.Mesh(
-                new THREE.BoxGeometry(10, 0.5, 0.5),
-                wallMaterial
+        const archTop = new THREE.Mesh(
+            new THREE.BoxGeometry(10, 0.5, 0.5),
+            wallMaterial
+        );
+        archTop.position.set(0, 8, -z);
+        archTop.receiveShadow = true;
+        group.add(archTop);
+
+        // Point lights every 8 units
+        if (z % 8 === 0) {
+            const lampLight = new THREE.PointLight(0xffcc85, 1.2, 15, 2);
+            lampLight.position.set(-3.5, 5, -z);
+            lampLight.castShadow = true;
+            lampLight.shadow.mapSize.width = 512;
+            lampLight.shadow.mapSize.height = 512;
+            group.add(lampLight);
+            lamps.push(lampLight);
+
+            const lampLight2 = new THREE.PointLight(0xffcc85, 1.2, 15, 2);
+            lampLight2.position.set(3.5, 5, -z);
+            lampLight2.castShadow = true;
+            group.add(lampLight2);
+            lamps.push(lampLight2);
+
+            // Visual lamp glow
+            const lampGlow = new THREE.Mesh(
+                new THREE.SphereGeometry(0.15, 8, 8),
+                new THREE.MeshBasicMaterial({
+                    color: 0xffcc85,
+                    transparent: true,
+                    opacity: 0.8
+                })
             );
-            arch.position.set(0, 7.5, -z);
-            scene.add(arch);
+            lampGlow.position.copy(lampLight.position);
+            group.add(lampGlow);
+
+            const lampGlow2 = lampGlow.clone();
+            lampGlow2.position.copy(lampLight2.position);
+            group.add(lampGlow2);
         }
-    }
-
-    // Point lamps
-    const lamps = [];
-    for (let z = 0; z < 80; z += 8) {
-        const lampLight = new THREE.PointLight(0xffcc85, 1.2, 12);
-        lampLight.position.set(-4, 4, -z);
-        lampLight.castShadow = true;
-        scene.add(lampLight);
-
-        const lampLight2 = new THREE.PointLight(0xffcc85, 1.2, 12);
-        lampLight2.position.set(4, 4, -z);
-        lampLight2.castShadow = true;
-        scene.add(lampLight2);
-
-        // Visual lamp
-        const lampGlow = new THREE.Mesh(
-            new THREE.SphereGeometry(0.2, 8, 8),
-            new THREE.MeshBasicMaterial({ color: 0xffcc85 })
-        );
-        lampGlow.position.set(-4, 4, -z);
-        scene.add(lampGlow);
-
-        const lampGlow2 = new THREE.Mesh(
-            new THREE.SphereGeometry(0.2, 8, 8),
-            new THREE.MeshBasicMaterial({ color: 0xffcc85 })
-        );
-        lampGlow2.position.set(4, 4, -z);
-        scene.add(lampGlow2);
-
-        lamps.push(lampLight, lampLight2);
     }
 
     // Return portal
     const returnPortal = createPortal({
-        position: [0, 0, 30],
-        width: 2.5,
-        height: 4,
-        depth: 0.2,
-        color: 0x8b5a3c,
-        emissiveColor: 0xffdd99,
-        emissiveIntensity: 0.4,
-        destination: 'main'
+        type: 'door',
+        position: [0, 0, 35],
+        size: [2.5, 4.5, 0.25],
+        color: 0x9b6f4a,
+        emissive: 0xffdd99,
+        emissiveIntensity: 0.5,
+        target: 'main'
     });
-    scene.add(returnPortal);
+    group.add(returnPortal);
 
-    scene.userData = {
+    group.userData = {
+        properties: {
+            fog: new THREE.FogExp2(0x1a1a1a, 0.03),
+            background: new THREE.Color(0x1a1a1a)
+        },
         lamps: lamps,
-        startPosition: { x: 0, y: CONFIG.cameraHeight, z: 25 },
+        startPosition: new THREE.Vector3(0, CONFIG.cameraHeight, 30),
         startRotation: { yaw: Math.PI, pitch: 0 }
     };
 
-    return scene;
+    return group;
 }
 
-// ----------------------------------------------------------------------------
-// GARDEN
-// ----------------------------------------------------------------------------
+// ============================================================================
+// GARDEN ROOM
+// ============================================================================
 
 function createGarden() {
-    const scene = new THREE.Scene();
-    scene.fog = new THREE.FogExp2(0xd9f7e3, 0.015);
-    scene.background = new THREE.Color(0xd9f7e3);
+    const group = new THREE.Group();
+    group.name = 'garden';
 
     // Lighting
     const sunlight = new THREE.DirectionalLight(0xfff5cc, 1.1);
-    sunlight.position.set(15, 25, -10);
+    sunlight.position.set(20, 25, -10);
     sunlight.castShadow = true;
-    scene.add(sunlight);
+    sunlight.shadow.mapSize.width = 2048;
+    sunlight.shadow.mapSize.height = 2048;
+    group.add(sunlight);
 
-    const ambient = new THREE.HemisphereLight(0xfff6d8, 0xc9f1a8, 0.8);
-    scene.add(ambient);
+    const hemisphereLight = new THREE.HemisphereLight(0xfff6d8, 0xc9f1a8, 0.85);
+    group.add(hemisphereLight);
 
     // Grass floor
+    const grassGeometry = new THREE.PlaneGeometry(25, 25, 50, 50);
     const grassMaterial = new THREE.MeshStandardMaterial({
-        color: 0xb4d197,
-        roughness: 0.8
+        color: 0xa7d19c,
+        roughness: 0.8,
+        metalness: 0.0
     });
-    const floor = new THREE.Mesh(
-        new THREE.PlaneGeometry(25, 25),
-        grassMaterial
-    );
-    floor.rotation.x = -Math.PI / 2;
-    floor.receiveShadow = true;
-    scene.add(floor);
+    const grass = new THREE.Mesh(grassGeometry, grassMaterial);
+    grass.rotation.x = -Math.PI / 2;
+    grass.receiveShadow = true;
+
+    // Store original positions for grass wave
+    const grassPositions = grassGeometry.attributes.position;
+    const grassOriginal = new Float32Array(grassPositions.count * 3);
+    for (let i = 0; i < grassPositions.count; i++) {
+        grassOriginal[i * 3] = grassPositions.getX(i);
+        grassOriginal[i * 3 + 1] = grassPositions.getY(i);
+        grassOriginal[i * 3 + 2] = grassPositions.getZ(i);
+    }
+    grass.userData.originalPositions = grassOriginal;
+
+    group.add(grass);
 
     // Glass roof panels
     const glassMaterial = new THREE.MeshStandardMaterial({
         color: 0xffffff,
         transparent: true,
-        opacity: 0.3,
+        opacity: 0.35,
         roughness: 0.1,
-        metalness: 0.4
+        metalness: 0.5,
+        side: THREE.DoubleSide
     });
 
-    const roofSegments = 5;
-    for (let i = 0; i < roofSegments; i++) {
+    const roofHeight = 10;
+    const panelCount = 5;
+    for (let i = 0; i < panelCount; i++) {
         const panel = new THREE.Mesh(
             new THREE.PlaneGeometry(5, 25),
             glassMaterial
         );
-        panel.rotation.x = -Math.PI / 4;
-        panel.position.set((i - roofSegments / 2) * 5, 8, 0);
-        scene.add(panel);
+        panel.position.set((i - panelCount / 2) * 5 + 2.5, roofHeight, 0);
+        panel.rotation.x = -Math.PI / 6;
+        group.add(panel);
     }
 
     // Glass walls
     const wallHeight = 10;
-    const walls = [
-        { pos: [0, wallHeight / 2, -12.5], rot: [0, 0, 0], size: [25, wallHeight, 0.1] },
-        { pos: [0, wallHeight / 2, 12.5], rot: [0, 0, 0], size: [25, wallHeight, 0.1] },
-        { pos: [-12.5, wallHeight / 2, 0], rot: [0, Math.PI / 2, 0], size: [25, wallHeight, 0.1] },
-        { pos: [12.5, wallHeight / 2, 0], rot: [0, Math.PI / 2, 0], size: [25, wallHeight, 0.1] }
+    const glassWalls = [
+        { pos: [0, wallHeight / 2, -12.5], size: [25, wallHeight, 0.1] },
+        { pos: [-12.5, wallHeight / 2, 0], size: [0.1, wallHeight, 25] },
+        { pos: [12.5, wallHeight / 2, 0], size: [0.1, wallHeight, 25] }
     ];
 
-    walls.forEach(wall => {
+    glassWalls.forEach(wall => {
         const mesh = new THREE.Mesh(
             new THREE.BoxGeometry(...wall.size),
             glassMaterial
         );
         mesh.position.set(...wall.pos);
-        mesh.rotation.set(...wall.rot);
-        scene.add(mesh);
+        group.add(mesh);
     });
 
-    // Hanging pots and flowers
+    // Plants and flowers
     const plants = [];
-    for (let i = 0; i < 15; i++) {
+    const flowers = [];
+
+    for (let i = 0; i < 20; i++) {
+        // Pot
         const pot = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.3, 0.2, 0.5, 8),
-            new THREE.MeshStandardMaterial({ color: 0x8b6f47, roughness: 0.8 })
+            new THREE.CylinderGeometry(0.25, 0.2, 0.4, 8),
+            new THREE.MeshStandardMaterial({
+                color: 0x8b6f47,
+                roughness: 0.8
+            })
         );
         pot.position.set(
             Math.random() * 20 - 10,
-            Math.random() * 1 + 2,
+            Math.random() * 1.5 + 2,
             Math.random() * 20 - 10
         );
         pot.castShadow = true;
-        scene.add(pot);
+        group.add(pot);
+        plants.push(pot);
 
-        // Flower on top
+        // Flower
+        const flowerColors = [0xff6b9d, 0xffd93d, 0xff8c42, 0xa8e6cf, 0xc77dff];
         const flower = new THREE.Mesh(
-            new THREE.SphereGeometry(0.2, 8, 8),
+            new THREE.SphereGeometry(0.15, 8, 8),
             new THREE.MeshStandardMaterial({
-                color: [0xff6b9d, 0xffd93d, 0xff8c42, 0xa8e6cf][Math.floor(Math.random() * 4)],
-                roughness: 0.6
+                color: flowerColors[Math.floor(Math.random() * flowerColors.length)],
+                roughness: 0.5,
+                emissive: flowerColors[Math.floor(Math.random() * flowerColors.length)],
+                emissiveIntensity: 0.1
             })
         );
         flower.position.copy(pot.position);
-        flower.position.y += 0.4;
+        flower.position.y += 0.35;
+        flower.castShadow = true;
         flower.userData.baseY = flower.position.y;
         flower.userData.offset = Math.random() * Math.PI * 2;
-        plants.push(flower);
-        scene.add(flower);
+        flowers.push(flower);
+        group.add(flower);
     }
 
-    // Floating particles (pollen)
+    // Floating particles (pollen/light)
     const particles = [];
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < 40; i++) {
         const particle = new THREE.Mesh(
-            new THREE.SphereGeometry(0.03, 6, 6),
+            new THREE.SphereGeometry(0.025, 6, 6),
             new THREE.MeshBasicMaterial({
                 color: 0xfffacd,
                 transparent: true,
-                opacity: 0.6
+                opacity: 0.7
             })
         );
         particle.position.set(
@@ -612,114 +709,133 @@ function createGarden() {
             Math.random() * 20 - 10
         );
         particle.userData.velocity = {
-            x: (Math.random() - 0.5) * 0.003,
-            y: (Math.random() - 0.5) * 0.003,
-            z: (Math.random() - 0.5) * 0.003
+            x: (Math.random() - 0.5) * 0.004,
+            y: (Math.random() - 0.3) * 0.003,
+            z: (Math.random() - 0.5) * 0.004
         };
         particles.push(particle);
-        scene.add(particle);
+        group.add(particle);
     }
 
     // Return portal
     const returnPortal = createPortal({
+        type: 'glass',
         position: [0, 0, -10],
-        width: 2,
-        height: 3.5,
-        depth: 0.1,
-        color: 0xddffdd,
-        emissiveColor: 0xfffdd8,
-        emissiveIntensity: 0.5,
-        destination: 'main',
+        size: [2, 4, 0.15],
+        color: 0xeeffdd,
+        emissive: 0xfffbe1,
+        emissiveIntensity: 0.55,
+        target: 'main',
         transparent: true,
-        opacity: 0.6
+        opacity: 0.65
     });
-    scene.add(returnPortal);
+    group.add(returnPortal);
 
-    scene.userData = {
-        plants: plants,
+    group.userData = {
+        properties: {
+            fog: new THREE.FogExp2(0xe7f8e9, 0.012),
+            background: new THREE.Color(0xe7f8e9)
+        },
+        grass: grass,
+        grassGeometry: grassGeometry,
+        flowers: flowers,
         particles: particles,
-        startPosition: { x: 0, y: CONFIG.cameraHeight, z: -5 },
+        startPosition: new THREE.Vector3(0, CONFIG.cameraHeight, -5),
         startRotation: { yaw: 0, pitch: 0 }
     };
 
-    return scene;
+    return group;
 }
 
-// ----------------------------------------------------------------------------
+// ============================================================================
 // PORTAL CREATION HELPER
-// ----------------------------------------------------------------------------
+// ============================================================================
 
 function createPortal(options) {
     const {
+        type,
         position,
-        width,
-        height,
-        depth,
+        size,
         color,
-        emissiveColor,
+        emissive,
         emissiveIntensity,
-        destination,
+        target,
         transparent = false,
-        opacity = 1.0,
-        isCircular = false
+        opacity = 1.0
     } = options;
 
     const group = new THREE.Group();
+    group.name = 'portal_' + target;
 
-    // Portal frame
+    // Portal frame material
     const frameMaterial = new THREE.MeshStandardMaterial({
         color: color,
-        emissive: emissiveColor,
+        emissive: emissive,
         emissiveIntensity: emissiveIntensity,
-        roughness: 0.5,
-        metalness: 0.2
+        roughness: 0.4,
+        metalness: 0.3,
+        transparent: transparent,
+        opacity: opacity
     });
 
     let portalMesh;
-    if (isCircular) {
+
+    if (type === 'circular') {
+        // Circular portal frame
         portalMesh = new THREE.Mesh(
-            new THREE.CylinderGeometry(width / 2, width / 2, depth, 32),
+            new THREE.TorusGeometry(size[0] / 2, 0.2, 16, 32),
             frameMaterial
         );
-        portalMesh.rotation.z = Math.PI / 2;
+        portalMesh.position.y = size[1];
     } else {
+        // Rectangular portal
         portalMesh = new THREE.Mesh(
-            new THREE.BoxGeometry(width, height, depth),
+            new THREE.BoxGeometry(...size),
             frameMaterial
         );
+        portalMesh.position.y = size[1] / 2;
     }
 
-    portalMesh.position.y = height / 2;
-
-    if (transparent) {
-        portalMesh.material.transparent = true;
-        portalMesh.material.opacity = opacity;
-    }
-
+    portalMesh.castShadow = true;
+    portalMesh.receiveShadow = true;
     group.add(portalMesh);
 
-    // Glow effect
-    const glowGeometry = isCircular
-        ? new THREE.CylinderGeometry(width / 2 + 0.2, width / 2 + 0.2, depth + 0.1, 32)
-        : new THREE.BoxGeometry(width + 0.2, height + 0.2, depth + 0.1);
+    // Glow halo
+    const glowSize = type === 'circular'
+        ? [size[0] + 0.3, size[1] + 0.3, size[2] + 0.1]
+        : [size[0] + 0.3, size[1] + 0.3, size[2] + 0.1];
 
     const glowMaterial = new THREE.MeshBasicMaterial({
-        color: emissiveColor,
+        color: emissive,
         transparent: true,
-        opacity: 0.3
+        opacity: 0.25,
+        side: THREE.DoubleSide
     });
 
-    const glow = new THREE.Mesh(glowGeometry, glowMaterial);
-    glow.position.copy(portalMesh.position);
-    if (isCircular) glow.rotation.z = Math.PI / 2;
+    let glow;
+    if (type === 'circular') {
+        glow = new THREE.Mesh(
+            new THREE.TorusGeometry(glowSize[0] / 2, 0.25, 16, 32),
+            glowMaterial
+        );
+        glow.position.y = size[1];
+    } else {
+        glow = new THREE.Mesh(
+            new THREE.BoxGeometry(...glowSize),
+            glowMaterial
+        );
+        glow.position.y = size[1] / 2;
+    }
+
     group.add(glow);
 
     group.position.set(...position);
     group.userData = {
-        destination: destination,
+        target: target,
         portalMesh: portalMesh,
         glow: glow,
-        baseIntensity: emissiveIntensity
+        baseEmissive: emissiveIntensity,
+        interactive: true
     };
 
     return group;
@@ -730,6 +846,8 @@ function createPortal(options) {
 // ============================================================================
 
 function setupControls() {
+    const canvas = STATE.renderer.domElement;
+
     // Keyboard
     window.addEventListener('keydown', (e) => {
         STATE.keys[e.key.toLowerCase()] = true;
@@ -739,48 +857,58 @@ function setupControls() {
         STATE.keys[e.key.toLowerCase()] = false;
     });
 
-    // Mouse
-    const canvas = STATE.renderer.domElement;
+    // Mouse drag for camera rotation
+    canvas.addEventListener('mousedown', (e) => {
+        STATE.mouse.down = true;
+        STATE.mouse.lastX = e.clientX;
+        STATE.mouse.lastY = e.clientY;
+    });
 
-    canvas.addEventListener('click', () => {
-        if (!STATE.pointerLocked) {
-            canvas.requestPointerLock();
-        } else {
-            checkPortalInteraction();
+    window.addEventListener('mouseup', () => {
+        STATE.mouse.down = false;
+    });
+
+    window.addEventListener('mousemove', (e) => {
+        if (STATE.mouse.down) {
+            const deltaX = e.clientX - STATE.mouse.lastX;
+            const deltaY = e.clientY - STATE.mouse.lastY;
+
+            STATE.cameraRotation.yaw -= deltaX * CONFIG.lookSpeed;
+            STATE.cameraRotation.pitch -= deltaY * CONFIG.lookSpeed;
+
+            // Clamp pitch
+            STATE.cameraRotation.pitch = Math.max(
+                -Math.PI / 2.5,
+                Math.min(Math.PI / 2.5, STATE.cameraRotation.pitch)
+            );
+
+            STATE.mouse.lastX = e.clientX;
+            STATE.mouse.lastY = e.clientY;
+        }
+
+        // Update mouse vector for raycasting (normalized device coordinates)
+        STATE.mouseVector.x = (e.clientX / window.innerWidth) * 2 - 1;
+        STATE.mouseVector.y = -(e.clientY / window.innerHeight) * 2 + 1;
+    });
+
+    // Click for portal interaction
+    canvas.addEventListener('click', (e) => {
+        if (!STATE.mouse.down) {
+            checkPortalClick(e);
         }
     });
 
-    document.addEventListener('pointerlockchange', () => {
-        STATE.pointerLocked = document.pointerLockElement === canvas;
-    });
-
-    document.addEventListener('mousemove', (e) => {
-        if (STATE.pointerLocked) {
-            STATE.mouse.dx = e.movementX;
-            STATE.mouse.dy = e.movementY;
-        }
-    });
-
-    // Scroll zoom
-    window.addEventListener('wheel', (e) => {
+    // Scroll zoom (reversed)
+    canvas.addEventListener('wheel', (e) => {
         e.preventDefault();
-        const zoomDelta = -e.deltaY * CONFIG.zoomSpeed;
-        STATE.camera.fov = Math.max(30, Math.min(100, STATE.camera.fov - zoomDelta * 10));
+        const zoomDelta = e.deltaY * 0.001;
+        STATE.camera.fov = Math.max(30, Math.min(90, STATE.camera.fov + zoomDelta * 10));
         STATE.camera.updateProjectionMatrix();
     }, { passive: false });
 }
 
 function updateControls() {
-    // Camera rotation from mouse
-    if (STATE.pointerLocked) {
-        STATE.cameraRotation.yaw -= STATE.mouse.dx * CONFIG.lookSpeed;
-        STATE.cameraRotation.pitch -= STATE.mouse.dy * CONFIG.lookSpeed;
-        STATE.cameraRotation.pitch = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, STATE.cameraRotation.pitch));
-        STATE.mouse.dx = 0;
-        STATE.mouse.dy = 0;
-    }
-
-    // Movement
+    // WASD movement
     const moveVector = new THREE.Vector3();
 
     if (STATE.keys['w']) moveVector.z -= 1;
@@ -789,55 +917,60 @@ function updateControls() {
     if (STATE.keys['d']) moveVector.x += 1;
 
     if (moveVector.length() > 0) {
-        moveVector.normalize();
+        moveVector.normalize().multiplyScalar(CONFIG.moveSpeed);
 
-        // Rotate movement vector by camera yaw
-        const rotatedVector = moveVector.applyAxisAngle(new THREE.Vector3(0, 1, 0), STATE.cameraRotation.yaw);
+        // Rotate by camera yaw
+        const rotated = moveVector.applyAxisAngle(
+            new THREE.Vector3(0, 1, 0),
+            STATE.cameraRotation.yaw
+        );
 
-        STATE.velocity.x = rotatedVector.x * CONFIG.moveSpeed;
-        STATE.velocity.z = rotatedVector.z * CONFIG.moveSpeed;
-    } else {
-        STATE.velocity.x *= 0.9;
-        STATE.velocity.z *= 0.9;
+        STATE.camera.position.x += rotated.x;
+        STATE.camera.position.z += rotated.z;
     }
 
-    // Apply velocity to camera
-    STATE.camera.position.x += STATE.velocity.x;
-    STATE.camera.position.z += STATE.velocity.z;
-
-    // Floating camera effect
+    // Floating camera animation
     const floatOffset = Math.sin(STATE.time * CONFIG.floatSpeed) * CONFIG.floatAmplitude;
     STATE.camera.position.y = CONFIG.cameraHeight + floatOffset;
 
     // Update camera orientation
-    const direction = new THREE.Vector3();
-    direction.x = Math.sin(STATE.cameraRotation.yaw) * Math.cos(STATE.cameraRotation.pitch);
-    direction.y = Math.sin(STATE.cameraRotation.pitch);
-    direction.z = -Math.cos(STATE.cameraRotation.yaw) * Math.cos(STATE.cameraRotation.pitch);
+    const direction = new THREE.Vector3(
+        Math.sin(STATE.cameraRotation.yaw) * Math.cos(STATE.cameraRotation.pitch),
+        Math.sin(STATE.cameraRotation.pitch),
+        -Math.cos(STATE.cameraRotation.yaw) * Math.cos(STATE.cameraRotation.pitch)
+    );
 
-    const lookAtPoint = new THREE.Vector3().addVectors(STATE.camera.position, direction);
-    STATE.camera.lookAt(lookAtPoint);
+    const lookTarget = new THREE.Vector3().addVectors(STATE.camera.position, direction);
+    STATE.camera.lookAt(lookTarget);
 }
 
-function checkPortalInteraction() {
-    const raycaster = new THREE.Raycaster();
-    raycaster.setFromCamera(new THREE.Vector2(0, 0), STATE.camera);
+function checkPortalClick(event) {
+    if (STATE.transitioning) return;
 
-    const currentScene = STATE.scenes[STATE.currentScene];
+    // Update raycaster
+    STATE.mouseVector.x = (event.clientX / window.innerWidth) * 2 - 1;
+    STATE.mouseVector.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+    STATE.raycaster.setFromCamera(STATE.mouseVector, STATE.camera);
+
+    // Find all portal meshes in current scene
     const portals = [];
+    const currentGroup = STATE.sceneGroups[STATE.currentScene];
 
-    currentScene.traverse((object) => {
-        if (object.userData.destination) {
-            portals.push(object);
+    currentGroup.traverse((obj) => {
+        if (obj.parent && obj.parent.userData.interactive) {
+            portals.push(obj);
         }
     });
 
-    const intersects = raycaster.intersectObjects(portals, true);
+    const intersects = STATE.raycaster.intersectObjects(portals, false);
 
     if (intersects.length > 0) {
-        const portal = intersects[0].object.parent;
-        if (portal.userData.destination) {
-            transitionToScene(portal.userData.destination);
+        const clickedObject = intersects[0].object;
+        const portal = clickedObject.parent;
+
+        if (portal.userData.target) {
+            transitionToScene(portal.userData.target);
         }
     }
 }
@@ -846,41 +979,54 @@ function checkPortalInteraction() {
 // SCENE TRANSITIONS
 // ============================================================================
 
-function transitionToScene(sceneName) {
-    if (STATE.transitioning || !STATE.scenes[sceneName]) return;
+function transitionToScene(targetScene) {
+    if (STATE.transitioning || !STATE.sceneGroups[targetScene]) return;
+    if (targetScene === STATE.currentScene) return;
 
     STATE.transitioning = true;
 
-    // Fade out
     const overlay = document.getElementById('fadeOverlay');
+    const sceneLabel = document.getElementById('sceneLabel');
+
+    // Fade to white
     overlay.style.opacity = '1';
 
     setTimeout(() => {
-        // Switch scene
-        STATE.currentScene = sceneName;
-        const newScene = STATE.scenes[sceneName];
+        // Remove old scene
+        STATE.activeScene.remove(STATE.sceneGroups[STATE.currentScene]);
 
-        // Reset camera position and rotation
-        if (newScene.userData.startPosition) {
-            STATE.camera.position.copy(newScene.userData.startPosition);
+        // Add new scene
+        STATE.currentScene = targetScene;
+        STATE.activeScene.add(STATE.sceneGroups[targetScene]);
+
+        // Apply scene properties
+        applySceneProperties(targetScene);
+
+        // Reset camera
+        const sceneData = STATE.sceneGroups[targetScene].userData;
+        if (sceneData.startPosition) {
+            STATE.camera.position.copy(sceneData.startPosition);
         }
-        if (newScene.userData.startRotation) {
-            STATE.cameraRotation.yaw = newScene.userData.startRotation.yaw;
-            STATE.cameraRotation.pitch = newScene.userData.startRotation.pitch;
+        if (sceneData.startRotation) {
+            STATE.cameraRotation.yaw = sceneData.startRotation.yaw;
+            STATE.cameraRotation.pitch = sceneData.startRotation.pitch;
         }
 
-        STATE.velocity = { x: 0, y: 0, z: 0 };
+        // Update UI
+        sceneLabel.textContent = SCENE_LABELS[targetScene] || targetScene;
 
         // Audio transition
-        playSceneAudio(sceneName);
+        playSceneAudio(targetScene);
 
-        // Fade in
-        overlay.style.opacity = '0';
-
+        // Fade back in
         setTimeout(() => {
-            STATE.transitioning = false;
-        }, 500);
-    }, 500);
+            overlay.style.opacity = '0';
+            setTimeout(() => {
+                STATE.transitioning = false;
+            }, 500);
+        }, 100);
+
+    }, CONFIG.transitionDuration / 2);
 }
 
 // ============================================================================
@@ -888,122 +1034,155 @@ function transitionToScene(sceneName) {
 // ============================================================================
 
 function setupAudio() {
-    // Audio will be placeholder - create audio context
     try {
         STATE.audioContext = new (window.AudioContext || window.webkitAudioContext)();
 
-        // Note: Audio files are referenced but not loaded (placeholders)
-        STATE.audioTracks = {
+        // Placeholder audio paths
+        STATE.audioBuffers = {
             main: 'assets/audio/main.mp3',
             pool: 'assets/audio/pool.mp3',
             hallway: 'assets/audio/hallway.mp3',
             garden: 'assets/audio/garden.mp3'
         };
+
+        // Note: In production, you would load actual audio buffers here
+        console.log('Audio system initialized (placeholder mode)');
     } catch (e) {
         console.log('Web Audio API not supported');
     }
 }
 
 function playSceneAudio(sceneName) {
-    // Placeholder - would cross-fade audio tracks
-    // In a real implementation, this would load and play audio files
-    console.log(`Playing audio for scene: ${sceneName}`);
+    // Placeholder for audio cross-fade
+    // In production, this would:
+    // 1. Fade out current audio source over 0.5s
+    // 2. Start new audio source at volume 0
+    // 3. Fade in new audio source over 0.5s
+    // 4. Loop audio indefinitely at low volume (0.3-0.4)
+
+    console.log(`Audio transition: ${sceneName} (${STATE.audioBuffers[sceneName]})`);
 }
 
 // ============================================================================
-// ANIMATION & UPDATE LOOP
+// ANIMATION LOOP
 // ============================================================================
 
 function animate() {
     requestAnimationFrame(animate);
 
-    STATE.time += 0.016;
+    STATE.time += 0.016; // ~60fps
 
     updateControls();
-    updateScene();
+    updateSceneAnimations();
 
-    const currentScene = STATE.scenes[STATE.currentScene];
-    STATE.renderer.render(currentScene, STATE.camera);
+    STATE.renderer.render(STATE.activeScene, STATE.camera);
 }
 
-function updateScene() {
-    const scene = STATE.scenes[STATE.currentScene];
+function updateSceneAnimations() {
+    const currentGroup = STATE.sceneGroups[STATE.currentScene];
+    if (!currentGroup) return;
 
-    // Update scene-specific animations
-    if (STATE.currentScene === 'main' && scene.userData.dustParticles) {
-        scene.userData.dustParticles.forEach(particle => {
+    const userData = currentGroup.userData;
+
+    // Main room - dust particles
+    if (STATE.currentScene === 'main' && userData.dustParticles) {
+        userData.dustParticles.forEach(particle => {
             particle.position.x += particle.userData.velocity.x;
             particle.position.y += particle.userData.velocity.y;
             particle.position.z += particle.userData.velocity.z;
 
-            // Boundary check
-            if (Math.abs(particle.position.x) > 9) particle.userData.velocity.x *= -1;
-            if (particle.position.y < 1 || particle.position.y > 11) particle.userData.velocity.y *= -1;
-            if (Math.abs(particle.position.z) > 9) particle.userData.velocity.z *= -1;
+            // Boundaries
+            if (Math.abs(particle.position.x) > 11) particle.userData.velocity.x *= -1;
+            if (particle.position.y < 0.5 || particle.position.y > 13) particle.userData.velocity.y *= -1;
+            if (Math.abs(particle.position.z) > 11) particle.userData.velocity.z *= -1;
         });
     }
 
-    if (STATE.currentScene === 'pool' && scene.userData.water) {
-        // Water ripple effect
-        const water = scene.userData.water;
-        const positions = water.geometry.attributes.position;
+    // Pool - water ripples
+    if (STATE.currentScene === 'pool' && userData.water) {
+        const positions = userData.waterGeometry.attributes.position;
+        const original = userData.water.userData.originalPositions;
 
         for (let i = 0; i < positions.count; i++) {
-            const x = positions.getX(i);
-            const y = positions.getY(i);
-            const wave = Math.sin(x * 0.5 + STATE.time) * 0.05 + Math.sin(y * 0.3 + STATE.time * 0.7) * 0.05;
-            positions.setZ(i, wave);
+            const x = original[i * 3];
+            const y = original[i * 3 + 1];
+
+            const wave1 = Math.sin(x * 0.5 + STATE.time * 0.8) * 0.06;
+            const wave2 = Math.sin(y * 0.3 + STATE.time * 0.6) * 0.05;
+            const wave3 = Math.sin((x + y) * 0.2 + STATE.time) * 0.04;
+
+            positions.setZ(i, wave1 + wave2 + wave3);
         }
         positions.needsUpdate = true;
     }
 
-    if (STATE.currentScene === 'hallway' && scene.userData.lamps) {
-        // Flickering lamp effect
-        scene.userData.lamps.forEach((lamp, index) => {
-            const flicker = Math.sin(STATE.time * 10 + index) * 0.1 + 0.9;
+    // Hallway - flickering lamps
+    if (STATE.currentScene === 'hallway' && userData.lamps) {
+        userData.lamps.forEach((lamp, index) => {
+            const flicker = Math.sin(STATE.time * 8 + index * 0.5) * 0.15 + 0.85;
             lamp.intensity = 1.2 * flicker;
         });
     }
 
+    // Garden - swaying flowers and grass
     if (STATE.currentScene === 'garden') {
-        // Swaying flowers
-        if (scene.userData.plants) {
-            scene.userData.plants.forEach(plant => {
-                const sway = Math.sin(STATE.time + plant.userData.offset) * 0.05;
-                plant.position.y = plant.userData.baseY + sway;
+        if (userData.flowers) {
+            userData.flowers.forEach(flower => {
+                const sway = Math.sin(STATE.time * 1.5 + flower.userData.offset) * 0.06;
+                flower.position.y = flower.userData.baseY + sway;
+                flower.rotation.x = sway * 0.3;
             });
         }
 
-        // Moving particles
-        if (scene.userData.particles) {
-            scene.userData.particles.forEach(particle => {
+        if (userData.grass) {
+            const positions = userData.grassGeometry.attributes.position;
+            const original = userData.grass.userData.originalPositions;
+
+            for (let i = 0; i < positions.count; i++) {
+                const x = original[i * 3];
+                const y = original[i * 3 + 1];
+
+                const wave = Math.sin(x * 0.3 + STATE.time * 0.5) * 0.02 +
+                            Math.sin(y * 0.4 + STATE.time * 0.7) * 0.02;
+
+                positions.setZ(i, wave);
+            }
+            positions.needsUpdate = true;
+        }
+
+        if (userData.particles) {
+            userData.particles.forEach(particle => {
                 particle.position.x += particle.userData.velocity.x;
                 particle.position.y += particle.userData.velocity.y;
                 particle.position.z += particle.userData.velocity.z;
 
-                if (Math.abs(particle.position.x) > 10) particle.userData.velocity.x *= -1;
-                if (particle.position.y < 1 || particle.position.y > 9) particle.userData.velocity.y *= -1;
-                if (Math.abs(particle.position.z) > 10) particle.userData.velocity.z *= -1;
+                if (Math.abs(particle.position.x) > 12) particle.userData.velocity.x *= -1;
+                if (particle.position.y < 0.5 || particle.position.y > 9) particle.userData.velocity.y *= -1;
+                if (Math.abs(particle.position.z) > 12) particle.userData.velocity.z *= -1;
             });
         }
     }
 
-    // Animate portal glows
-    scene.traverse((object) => {
-        if (object.userData.glow) {
-            const pulse = Math.sin(STATE.time * 2) * 0.2 + 0.8;
-            object.userData.glow.material.opacity = 0.3 * pulse;
+    // Animate all portal glows (pulsing effect)
+    currentGroup.traverse((obj) => {
+        if (obj.parent && obj.parent.userData.glow) {
+            const portal = obj.parent;
+            const pulse = Math.sin(STATE.time * 1.5) * 0.3 + 0.7;
 
-            if (object.userData.portalMesh) {
-                const baseIntensity = object.userData.baseIntensity || 0.3;
-                object.userData.portalMesh.material.emissiveIntensity = baseIntensity * pulse;
+            if (portal.userData.glow) {
+                portal.userData.glow.material.opacity = 0.25 * pulse;
+            }
+
+            if (portal.userData.portalMesh && portal.userData.baseEmissive) {
+                portal.userData.portalMesh.material.emissiveIntensity =
+                    portal.userData.baseEmissive * pulse;
             }
         }
     });
 }
 
 // ============================================================================
-// START THE EXPERIENCE
+// START
 // ============================================================================
 
 window.addEventListener('DOMContentLoaded', init);
