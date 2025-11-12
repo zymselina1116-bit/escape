@@ -53,7 +53,14 @@ const STATE = {
     },
     virtualHand: null,
     grabbedOrb: null,
-    handTrail: []
+    handTrail: [],
+    firstPersonHands: null,
+    firstPersonBody: null,
+    leftHand: null,
+    rightHand: null,
+    grabbedKey: null,
+    nearestDoorHandle: null,
+    handleRotation: 0
 };
 
 const CONFIG = {
@@ -81,6 +88,7 @@ const SCENE_LABELS = {
 function init() {
     setupRenderer();
     setupCamera();
+    createFirstPersonView();
     setupScenes();
     setupControls();
     setupAudio();
@@ -123,6 +131,106 @@ function setupCamera() {
     );
     STATE.camera.position.set(0, CONFIG.cameraHeight, 10);
     STATE.camera.lookAt(0, 1.5, 0);
+}
+
+// ============================================================================
+// FIRST-PERSON VIEW (Hands + Body)
+// ============================================================================
+
+function createFirstPersonView() {
+    const fpGroup = new THREE.Group();
+    fpGroup.name = 'firstPersonView';
+
+    // Cartoon hand material - soft glowing
+    const handMaterial = new THREE.MeshToonMaterial({
+        color: 0xffdbac,
+        emissive: 0xffd699,
+        emissiveIntensity: 0.2,
+        transparent: true,
+        opacity: 0.95
+    });
+
+    // Left Hand
+    STATE.leftHand = createCartoonHand('left', handMaterial);
+    STATE.leftHand.position.set(-0.3, -0.4, -0.6);
+    fpGroup.add(STATE.leftHand);
+
+    // Right Hand
+    STATE.rightHand = createCartoonHand('right', handMaterial);
+    STATE.rightHand.position.set(0.3, -0.4, -0.6);
+    fpGroup.add(STATE.rightHand);
+
+    // Lower body (torso bottom)
+    const bodyGeometry = new THREE.CylinderGeometry(0.25, 0.35, 0.6, 16);
+    const bodyMaterial = new THREE.MeshToonMaterial({
+        color: 0x88aacc,
+        emissive: 0x6688aa,
+        emissiveIntensity: 0.15,
+        transparent: true,
+        opacity: 0.9
+    });
+    STATE.firstPersonBody = new THREE.Mesh(bodyGeometry, bodyMaterial);
+    STATE.firstPersonBody.position.set(0, -0.9, -0.3);
+    fpGroup.add(STATE.firstPersonBody);
+
+    // Attach to camera
+    STATE.camera.add(fpGroup);
+    STATE.firstPersonHands = fpGroup;
+}
+
+function createCartoonHand(side, material) {
+    const hand = new THREE.Group();
+
+    // Palm
+    const palmGeometry = new THREE.SphereGeometry(0.08, 12, 12);
+    const palm = new THREE.Mesh(palmGeometry, material.clone());
+    palm.scale.set(1, 0.8, 1.2);
+    hand.add(palm);
+
+    // Arm (short forearm)
+    const armGeometry = new THREE.CylinderGeometry(0.05, 0.06, 0.3, 12);
+    const arm = new THREE.Mesh(armGeometry, material.clone());
+    arm.position.set(0, 0.15, -0.05);
+    arm.rotation.x = Math.PI / 6;
+    hand.add(arm);
+
+    // Fingers (simplified)
+    const fingers = [];
+    const fingerPositions = [
+        { x: -0.05, y: 0, z: 0.08 },  // Index
+        { x: 0, y: 0, z: 0.09 },      // Middle
+        { x: 0.05, y: 0, z: 0.08 },   // Ring
+        { x: side === 'left' ? 0.07 : -0.07, y: 0, z: 0.02 }  // Thumb
+    ];
+
+    fingerPositions.forEach((pos, i) => {
+        const fingerGroup = new THREE.Group();
+
+        // Finger segments
+        for (let j = 0; j < 2; j++) {
+            const segment = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.015, 0.015, 0.04, 8),
+                material.clone()
+            );
+            segment.position.y = j * 0.04;
+            segment.rotation.x = Math.PI / 2;
+            fingerGroup.add(segment);
+        }
+
+        fingerGroup.position.set(pos.x, pos.y, pos.z);
+        fingers.push(fingerGroup);
+        hand.add(fingerGroup);
+    });
+
+    hand.userData = {
+        palm: palm,
+        arm: arm,
+        fingers: fingers,
+        closedAmount: 0,
+        side: side
+    };
+
+    return hand;
 }
 
 // ============================================================================
