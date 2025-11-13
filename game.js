@@ -1903,6 +1903,86 @@ function updateHandTrail() {
 }
 
 // ============================================================================
+// FIRST-PERSON HAND TRACKING
+// ============================================================================
+
+function updateFirstPersonHands() {
+    if (!STATE.leftHand || !STATE.rightHand || !STATE.webcam.enabled) return;
+
+    // Map webcam motion to hand offset from base position
+    const handOffsetX = STATE.webcam.handX * 0.15; // Scaled for screen space
+    const handOffsetY = STATE.webcam.handY * 0.1;
+    const handOffsetZ = STATE.webcam.handZ * 0.05;
+
+    // Update left hand position (smoothly interpolate)
+    const leftBasePos = { x: -0.3, y: -0.4, z: -0.6 };
+    const leftTargetX = leftBasePos.x + handOffsetX;
+    const leftTargetY = leftBasePos.y + handOffsetY;
+    const leftTargetZ = leftBasePos.z + handOffsetZ;
+
+    STATE.leftHand.position.x += (leftTargetX - STATE.leftHand.position.x) * 0.15;
+    STATE.leftHand.position.y += (leftTargetY - STATE.leftHand.position.y) * 0.15;
+    STATE.leftHand.position.z += (leftTargetZ - STATE.leftHand.position.z) * 0.15;
+
+    // Update right hand position (mirrored)
+    const rightBasePos = { x: 0.3, y: -0.4, z: -0.6 };
+    const rightTargetX = rightBasePos.x + handOffsetX;
+    const rightTargetY = rightBasePos.y + handOffsetY;
+    const rightTargetZ = rightBasePos.z + handOffsetZ;
+
+    STATE.rightHand.position.x += (rightTargetX - STATE.rightHand.position.x) * 0.15;
+    STATE.rightHand.position.y += (rightTargetY - STATE.rightHand.position.y) * 0.15;
+    STATE.rightHand.position.z += (rightTargetZ - STATE.rightHand.position.z) * 0.15;
+
+    // Animate hand closing based on pinch strength
+    animateFirstPersonHandClosing(STATE.leftHand, STATE.webcam.pinchStrength);
+    animateFirstPersonHandClosing(STATE.rightHand, STATE.webcam.pinchStrength);
+
+    // Add subtle idle animation when not moving
+    if (STATE.webcam.motionStrength < 0.05) {
+        const idleOffset = Math.sin(STATE.time * 1.2) * 0.02;
+        STATE.leftHand.position.y += idleOffset;
+        STATE.rightHand.position.y -= idleOffset; // Opposite phase
+    }
+}
+
+function animateFirstPersonHandClosing(hand, closingAmount) {
+    if (!hand || !hand.userData.fingers) return;
+
+    const fingers = hand.userData.fingers;
+
+    // Store target closing amount
+    hand.userData.closedAmount += (closingAmount - hand.userData.closedAmount) * 0.2;
+    const currentClosed = hand.userData.closedAmount;
+
+    // Curl fingers
+    fingers.forEach((fingerGroup, fingerIndex) => {
+        const children = fingerGroup.children;
+
+        children.forEach((segment, segmentIndex) => {
+            // More curl for outer segments
+            const curlMultiplier = (segmentIndex + 1) * 0.3;
+            const targetRotation = currentClosed * curlMultiplier;
+
+            // Rotate around X axis to curl fingers inward
+            segment.rotation.x = Math.PI / 2 + targetRotation;
+        });
+
+        // Move finger group slightly inward when closing
+        if (fingerIndex < 3) { // Not thumb
+            const originalZ = 0.08 + (fingerIndex === 1 ? 0.01 : 0);
+            fingerGroup.position.z = originalZ - (currentClosed * 0.02);
+        }
+    });
+
+    // Enhance glow when closing
+    if (hand.userData.palm && hand.userData.palm.material) {
+        hand.userData.palm.material.emissiveIntensity = 0.2 + currentClosed * 0.3;
+        hand.userData.palm.material.opacity = 0.95 + currentClosed * 0.05;
+    }
+}
+
+// ============================================================================
 // ANIMATION LOOP
 // ============================================================================
 
@@ -1912,6 +1992,7 @@ function animate() {
     STATE.time += 0.016; // ~60fps
 
     updateControls();
+    updateFirstPersonHands(); // Update first-person hands with webcam tracking
     updateSceneAnimations();
     applyHandInteraction();
 
