@@ -150,6 +150,93 @@ function createFirstPersonView() {
         opacity: 0.95
     });
 
+    // Body material - soft glowing ethereal
+    const bodyMaterial = new THREE.MeshToonMaterial({
+        color: 0x88aacc,
+        emissive: 0x6688aa,
+        emissiveIntensity: 0.15,
+        transparent: true,
+        opacity: 0.85
+    });
+
+    // Create body group (for easier manipulation)
+    const bodyGroup = new THREE.Group();
+    bodyGroup.name = 'bodyGroup';
+
+    // Torso (upper body)
+    const torsoGeometry = new THREE.CylinderGeometry(0.25, 0.3, 0.5, 16);
+    const torso = new THREE.Mesh(torsoGeometry, bodyMaterial.clone());
+    torso.position.set(0, -0.7, -0.3);
+    bodyGroup.add(torso);
+
+    // Waist/hip area
+    const waistGeometry = new THREE.SphereGeometry(0.32, 16, 16);
+    const waist = new THREE.Mesh(waistGeometry, bodyMaterial.clone());
+    waist.scale.set(1, 0.5, 0.8);
+    waist.position.set(0, -0.95, -0.3);
+    bodyGroup.add(waist);
+
+    // Left Leg
+    const legMaterial = bodyMaterial.clone();
+    const leftLegUpper = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.12, 0.11, 0.35, 12),
+        legMaterial.clone()
+    );
+    leftLegUpper.position.set(-0.15, -1.25, -0.3);
+    bodyGroup.add(leftLegUpper);
+
+    const leftLegLower = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.1, 0.09, 0.35, 12),
+        legMaterial.clone()
+    );
+    leftLegLower.position.set(-0.15, -1.65, -0.3);
+    bodyGroup.add(leftLegLower);
+
+    // Right Leg
+    const rightLegUpper = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.12, 0.11, 0.35, 12),
+        legMaterial.clone()
+    );
+    rightLegUpper.position.set(0.15, -1.25, -0.3);
+    bodyGroup.add(rightLegUpper);
+
+    const rightLegLower = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.1, 0.09, 0.35, 12),
+        legMaterial.clone()
+    );
+    rightLegLower.position.set(0.15, -1.65, -0.3);
+    bodyGroup.add(rightLegLower);
+
+    // Feet
+    const leftFoot = new THREE.Mesh(
+        new THREE.BoxGeometry(0.12, 0.08, 0.18),
+        legMaterial.clone()
+    );
+    leftFoot.position.set(-0.15, -1.86, -0.25);
+    bodyGroup.add(leftFoot);
+
+    const rightFoot = new THREE.Mesh(
+        new THREE.BoxGeometry(0.12, 0.08, 0.18),
+        legMaterial.clone()
+    );
+    rightFoot.position.set(0.15, -1.86, -0.25);
+    bodyGroup.add(rightFoot);
+
+    // Store body parts for animation
+    STATE.firstPersonBody = bodyGroup;
+    STATE.bodyParts = {
+        torso: torso,
+        waist: waist,
+        leftLegUpper: leftLegUpper,
+        leftLegLower: leftLegLower,
+        rightLegUpper: rightLegUpper,
+        rightLegLower: rightLegLower,
+        leftFoot: leftFoot,
+        rightFoot: rightFoot
+    };
+
+    fpGroup.add(bodyGroup);
+
     // Left Hand
     STATE.leftHand = createCartoonHand('left', handMaterial);
     STATE.leftHand.position.set(-0.3, -0.4, -0.6);
@@ -159,19 +246,6 @@ function createFirstPersonView() {
     STATE.rightHand = createCartoonHand('right', handMaterial);
     STATE.rightHand.position.set(0.3, -0.4, -0.6);
     fpGroup.add(STATE.rightHand);
-
-    // Lower body (torso bottom)
-    const bodyGeometry = new THREE.CylinderGeometry(0.25, 0.35, 0.6, 16);
-    const bodyMaterial = new THREE.MeshToonMaterial({
-        color: 0x88aacc,
-        emissive: 0x6688aa,
-        emissiveIntensity: 0.15,
-        transparent: true,
-        opacity: 0.9
-    });
-    STATE.firstPersonBody = new THREE.Mesh(bodyGeometry, bodyMaterial);
-    STATE.firstPersonBody.position.set(0, -0.9, -0.3);
-    fpGroup.add(STATE.firstPersonBody);
 
     // Attach to camera
     STATE.camera.add(fpGroup);
@@ -2027,6 +2101,9 @@ function updateFirstPersonHands() {
     animateFirstPersonHandClosing(STATE.leftHand, STATE.webcam.pinchStrength);
     animateFirstPersonHandClosing(STATE.rightHand, STATE.webcam.pinchStrength);
 
+    // Animate body based on hand position
+    animateBodyPosture(handOffsetX, handOffsetY, handOffsetZ);
+
     // Check for hand-based key pickup
     checkHandKeyPickup();
 
@@ -2039,6 +2116,77 @@ function updateFirstPersonHands() {
         STATE.leftHand.position.y += idleOffset;
         STATE.rightHand.position.y -= idleOffset; // Opposite phase
     }
+}
+
+function animateBodyPosture(handOffsetX, handOffsetY, handOffsetZ) {
+    if (!STATE.firstPersonBody || !STATE.bodyParts) return;
+
+    const bodyParts = STATE.bodyParts;
+    const bodyGroup = STATE.firstPersonBody;
+
+    // Calculate target body adjustments based on hand position
+    // Forward lean when hands reach forward (negative Z is forward in camera space)
+    const forwardLean = -handOffsetZ * 0.3; // Torso leans forward
+
+    // Upward stretch when hands raise
+    const upwardStretch = handOffsetY * 0.15; // Body stretches upward
+
+    // Side tilt when hands move horizontally
+    const sideTilt = handOffsetX * 0.08; // Body tilts slightly
+
+    // Apply rotations to body group for overall posture
+    const targetRotationX = forwardLean; // Forward/backward lean
+    const targetRotationZ = sideTilt; // Left/right tilt
+
+    // Smooth interpolation for natural movement
+    bodyGroup.rotation.x += (targetRotationX - bodyGroup.rotation.x) * 0.1;
+    bodyGroup.rotation.z += (targetRotationZ - bodyGroup.rotation.z) * 0.1;
+
+    // Adjust torso position for upward stretch
+    const torsoBaseY = -0.7;
+    const torsoTargetY = torsoBaseY + upwardStretch;
+    bodyParts.torso.position.y += (torsoTargetY - bodyParts.torso.position.y) * 0.12;
+
+    // Waist follows torso with slight delay
+    const waistBaseY = -0.95;
+    const waistTargetY = waistBaseY + (upwardStretch * 0.7);
+    bodyParts.waist.position.y += (waistTargetY - bodyParts.waist.position.y) * 0.1;
+
+    // Legs adjust subtly based on body lean
+    const legLeanFactor = forwardLean * 0.5;
+
+    // Upper legs follow body lean
+    const legUpperBaseY = -1.25;
+    const legUpperTargetY = legUpperBaseY + (upwardStretch * 0.3);
+
+    bodyParts.leftLegUpper.position.y += (legUpperTargetY - bodyParts.leftLegUpper.position.y) * 0.08;
+    bodyParts.rightLegUpper.position.y += (legUpperTargetY - bodyParts.rightLegUpper.position.y) * 0.08;
+
+    // Apply subtle rotation to upper legs
+    bodyParts.leftLegUpper.rotation.x += (legLeanFactor - bodyParts.leftLegUpper.rotation.x) * 0.08;
+    bodyParts.rightLegUpper.rotation.x += (legLeanFactor - bodyParts.rightLegUpper.rotation.x) * 0.08;
+
+    // Lower legs have minimal adjustment
+    const legLowerBaseY = -1.65;
+    bodyParts.leftLegLower.position.y += (legLowerBaseY - bodyParts.leftLegLower.position.y) * 0.05;
+    bodyParts.rightLegLower.position.y += (legLowerBaseY - bodyParts.rightLegLower.position.y) * 0.05;
+
+    // Feet stay relatively stable but tilt slightly
+    const footTilt = forwardLean * 0.2;
+    bodyParts.leftFoot.rotation.x += (footTilt - bodyParts.leftFoot.rotation.x) * 0.06;
+    bodyParts.rightFoot.rotation.x += (footTilt - bodyParts.rightFoot.rotation.x) * 0.06;
+
+    // Add subtle ethereal glow pulse based on movement intensity
+    const movementIntensity = Math.abs(handOffsetX) + Math.abs(handOffsetY) + Math.abs(handOffsetZ);
+    const glowPulse = Math.sin(STATE.time * 3) * 0.1 + 0.15;
+    const dynamicGlow = glowPulse + (movementIntensity * 0.2);
+
+    // Apply glow to all body parts
+    Object.values(bodyParts).forEach(part => {
+        if (part.material && part.material.emissiveIntensity !== undefined) {
+            part.material.emissiveIntensity += (dynamicGlow - part.material.emissiveIntensity) * 0.1;
+        }
+    });
 }
 
 function animateFirstPersonHandClosing(hand, closingAmount) {
