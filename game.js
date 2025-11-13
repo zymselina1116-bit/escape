@@ -222,6 +222,40 @@ function createFirstPersonView() {
     rightFoot.position.set(0.15, -1.86, -0.25);
     bodyGroup.add(rightFoot);
 
+    // Add shoulder area for better connection to arms
+    const leftShoulder = new THREE.Mesh(
+        new THREE.SphereGeometry(0.1, 12, 12),
+        bodyMaterial.clone()
+    );
+    leftShoulder.position.set(-0.25, -0.5, -0.35);
+    leftShoulder.scale.set(0.8, 1, 0.7);
+    bodyGroup.add(leftShoulder);
+
+    const rightShoulder = new THREE.Mesh(
+        new THREE.SphereGeometry(0.1, 12, 12),
+        bodyMaterial.clone()
+    );
+    rightShoulder.position.set(0.25, -0.5, -0.35);
+    rightShoulder.scale.set(0.8, 1, 0.7);
+    bodyGroup.add(rightShoulder);
+
+    // Add upper arms connecting shoulders to hands
+    const leftUpperArm = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.08, 0.07, 0.25, 12),
+        handMaterial.clone()
+    );
+    leftUpperArm.position.set(-0.27, -0.65, -0.4);
+    leftUpperArm.rotation.x = Math.PI / 6;
+    bodyGroup.add(leftUpperArm);
+
+    const rightUpperArm = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.08, 0.07, 0.25, 12),
+        handMaterial.clone()
+    );
+    rightUpperArm.position.set(0.27, -0.65, -0.4);
+    rightUpperArm.rotation.x = Math.PI / 6;
+    bodyGroup.add(rightUpperArm);
+
     // Store body parts for animation
     STATE.firstPersonBody = bodyGroup;
     STATE.bodyParts = {
@@ -232,19 +266,45 @@ function createFirstPersonView() {
         rightLegUpper: rightLegUpper,
         rightLegLower: rightLegLower,
         leftFoot: leftFoot,
-        rightFoot: rightFoot
+        rightFoot: rightFoot,
+        leftShoulder: leftShoulder,
+        rightShoulder: rightShoulder,
+        leftUpperArm: leftUpperArm,
+        rightUpperArm: rightUpperArm
     };
 
     fpGroup.add(bodyGroup);
 
-    // Left Hand
+    // Left Hand with forearm
     STATE.leftHand = createCartoonHand('left', handMaterial);
     STATE.leftHand.position.set(-0.3, -0.4, -0.6);
+
+    // Add forearm to left hand
+    const leftForearm = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.06, 0.07, 0.3, 12),
+        handMaterial.clone()
+    );
+    leftForearm.position.set(0, 0.15, -0.05);
+    leftForearm.rotation.x = Math.PI / 8;
+    STATE.leftHand.add(leftForearm);
+    STATE.leftHand.userData.forearm = leftForearm;
+
     fpGroup.add(STATE.leftHand);
 
-    // Right Hand
+    // Right Hand with forearm
     STATE.rightHand = createCartoonHand('right', handMaterial);
     STATE.rightHand.position.set(0.3, -0.4, -0.6);
+
+    // Add forearm to right hand
+    const rightForearm = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.06, 0.07, 0.3, 12),
+        handMaterial.clone()
+    );
+    rightForearm.position.set(0, 0.15, -0.05);
+    rightForearm.rotation.x = Math.PI / 8;
+    STATE.rightHand.add(rightForearm);
+    STATE.rightHand.userData.forearm = rightForearm;
+
     fpGroup.add(STATE.rightHand);
 
     // Attach to camera
@@ -2101,6 +2161,24 @@ function updateFirstPersonHands() {
     animateFirstPersonHandClosing(STATE.leftHand, STATE.webcam.pinchStrength);
     animateFirstPersonHandClosing(STATE.rightHand, STATE.webcam.pinchStrength);
 
+    // Animate forearms based on hand movement
+    if (STATE.leftHand.userData.forearm && STATE.rightHand.userData.forearm) {
+        // Forearms rotate slightly based on hand height
+        const forearmRotation = Math.PI / 8 - (handOffsetY * 0.3);
+
+        STATE.leftHand.userData.forearm.rotation.x += (forearmRotation - STATE.leftHand.userData.forearm.rotation.x) * 0.12;
+        STATE.rightHand.userData.forearm.rotation.x += (forearmRotation - STATE.rightHand.userData.forearm.rotation.x) * 0.12;
+
+        // Forearms glow more when hands are active
+        const forearmGlow = 0.2 + (STATE.webcam.motionStrength * 0.3);
+        if (STATE.leftHand.userData.forearm.material) {
+            STATE.leftHand.userData.forearm.material.emissiveIntensity += (forearmGlow - STATE.leftHand.userData.forearm.material.emissiveIntensity) * 0.1;
+        }
+        if (STATE.rightHand.userData.forearm.material) {
+            STATE.rightHand.userData.forearm.material.emissiveIntensity += (forearmGlow - STATE.rightHand.userData.forearm.material.emissiveIntensity) * 0.1;
+        }
+    }
+
     // Animate body based on hand position
     animateBodyPosture(handOffsetX, handOffsetY, handOffsetZ);
 
@@ -2124,6 +2202,10 @@ function animateBodyPosture(handOffsetX, handOffsetY, handOffsetZ) {
     const bodyParts = STATE.bodyParts;
     const bodyGroup = STATE.firstPersonBody;
 
+    // Idle breathing animation (subtle expansion/contraction)
+    const breathingCycle = Math.sin(STATE.time * 0.8) * 0.015 + 0.015; // Slow breathing
+    const breathingScale = 1.0 + breathingCycle;
+
     // Calculate target body adjustments based on hand position
     // Forward lean when hands reach forward (negative Z is forward in camera space)
     const forwardLean = -handOffsetZ * 0.3; // Torso leans forward
@@ -2141,6 +2223,10 @@ function animateBodyPosture(handOffsetX, handOffsetY, handOffsetZ) {
     // Smooth interpolation for natural movement
     bodyGroup.rotation.x += (targetRotationX - bodyGroup.rotation.x) * 0.1;
     bodyGroup.rotation.z += (targetRotationZ - bodyGroup.rotation.z) * 0.1;
+
+    // Apply breathing to torso
+    bodyParts.torso.scale.x = breathingScale;
+    bodyParts.torso.scale.z = breathingScale;
 
     // Adjust torso position for upward stretch
     const torsoBaseY = -0.7;
@@ -2176,6 +2262,33 @@ function animateBodyPosture(handOffsetX, handOffsetY, handOffsetZ) {
     bodyParts.leftFoot.rotation.x += (footTilt - bodyParts.leftFoot.rotation.x) * 0.06;
     bodyParts.rightFoot.rotation.x += (footTilt - bodyParts.rightFoot.rotation.x) * 0.06;
 
+    // Animate shoulders following hand movement
+    if (bodyParts.leftShoulder && bodyParts.rightShoulder) {
+        const shoulderLiftY = handOffsetY * 0.2;
+        const shoulderForwardZ = handOffsetZ * 0.15;
+
+        bodyParts.leftShoulder.position.y = -0.5 + shoulderLiftY;
+        bodyParts.leftShoulder.position.z = -0.35 + shoulderForwardZ;
+
+        bodyParts.rightShoulder.position.y = -0.5 + shoulderLiftY;
+        bodyParts.rightShoulder.position.z = -0.35 + shoulderForwardZ;
+    }
+
+    // Animate upper arms following hand direction
+    if (bodyParts.leftUpperArm && bodyParts.rightUpperArm) {
+        // Arms rotate based on hand height
+        const armRotation = Math.PI / 6 - (handOffsetY * 0.4);
+        const armForwardZ = handOffsetZ * 0.15;
+
+        bodyParts.leftUpperArm.rotation.x += (armRotation - bodyParts.leftUpperArm.rotation.x) * 0.15;
+        bodyParts.leftUpperArm.position.z = -0.4 + armForwardZ;
+        bodyParts.leftUpperArm.position.y = -0.65 + (handOffsetY * 0.15);
+
+        bodyParts.rightUpperArm.rotation.x += (armRotation - bodyParts.rightUpperArm.rotation.x) * 0.15;
+        bodyParts.rightUpperArm.position.z = -0.4 + armForwardZ;
+        bodyParts.rightUpperArm.position.y = -0.65 + (handOffsetY * 0.15);
+    }
+
     // Add subtle ethereal glow pulse based on movement intensity
     const movementIntensity = Math.abs(handOffsetX) + Math.abs(handOffsetY) + Math.abs(handOffsetZ);
     const glowPulse = Math.sin(STATE.time * 3) * 0.1 + 0.15;
@@ -2187,6 +2300,12 @@ function animateBodyPosture(handOffsetX, handOffsetY, handOffsetZ) {
             part.material.emissiveIntensity += (dynamicGlow - part.material.emissiveIntensity) * 0.1;
         }
     });
+
+    // Apply breathing glow intensity variation
+    const breathingGlow = breathingCycle * 0.5;
+    if (bodyParts.torso.material) {
+        bodyParts.torso.material.emissiveIntensity += breathingGlow;
+    }
 }
 
 function animateFirstPersonHandClosing(hand, closingAmount) {
