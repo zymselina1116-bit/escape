@@ -141,22 +141,18 @@ function createFirstPersonView() {
     const fpGroup = new THREE.Group();
     fpGroup.name = 'firstPersonView';
 
-    // Cartoon hand material - soft glowing
-    const handMaterial = new THREE.MeshToonMaterial({
+    // Cartoon hand material - soft glowing (using BasicMaterial for visibility)
+    const handMaterial = new THREE.MeshBasicMaterial({
         color: 0xffdbac,
-        emissive: 0xffd699,
-        emissiveIntensity: 0.2,
         transparent: true,
         opacity: 0.95
     });
 
-    // Body material - soft glowing ethereal
-    const bodyMaterial = new THREE.MeshToonMaterial({
+    // Body material - soft glowing ethereal (using BasicMaterial for visibility)
+    const bodyMaterial = new THREE.MeshBasicMaterial({
         color: 0x88aacc,
-        emissive: 0x6688aa,
-        emissiveIntensity: 0.15,
         transparent: true,
-        opacity: 0.85
+        opacity: 0.95
     });
 
     // Create body group (for easier manipulation)
@@ -256,6 +252,18 @@ function createFirstPersonView() {
     rightUpperArm.rotation.x = Math.PI / 6;
     bodyGroup.add(rightUpperArm);
 
+    // DEBUG: Add a test sphere to verify body is being rendered
+    const testSphere = new THREE.Mesh(
+        new THREE.SphereGeometry(0.2, 16, 16),
+        new THREE.MeshBasicMaterial({
+            color: 0xff0000,
+            transparent: false,
+            opacity: 1.0
+        })
+    );
+    testSphere.position.set(0, -0.3, -0.8);
+    bodyGroup.add(testSphere);
+
     // Store body parts for animation
     STATE.firstPersonBody = bodyGroup;
     STATE.bodyParts = {
@@ -270,10 +278,13 @@ function createFirstPersonView() {
         leftShoulder: leftShoulder,
         rightShoulder: rightShoulder,
         leftUpperArm: leftUpperArm,
-        rightUpperArm: rightUpperArm
+        rightUpperArm: rightUpperArm,
+        testSphere: testSphere
     };
 
     fpGroup.add(bodyGroup);
+
+    console.log('First-person body created with', Object.keys(STATE.bodyParts).length, 'parts');
 
     // Left Hand with forearm
     STATE.leftHand = createCartoonHand('left', handMaterial);
