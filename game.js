@@ -2030,6 +2030,9 @@ function updateFirstPersonHands() {
     // Check for hand-based key pickup
     checkHandKeyPickup();
 
+    // Check for door handle interaction
+    checkHandDoorHandleInteraction();
+
     // Add subtle idle animation when not moving
     if (STATE.webcam.motionStrength < 0.05) {
         const idleOffset = Math.sin(STATE.time * 1.2) * 0.02;
@@ -2147,6 +2150,185 @@ function checkHandKeyPickup() {
             STATE.grabbedKey = null;
         }
     }
+}
+
+// ============================================================================
+// DOOR HANDLE ROTATION MECHANICS
+// ============================================================================
+
+function checkHandDoorHandleInteraction() {
+    if (!STATE.rightHand || !STATE.webcam.enabled) return;
+
+    const currentGroup = STATE.sceneGroups[STATE.currentScene];
+    if (!currentGroup) return;
+
+    // Get right hand's world position
+    const handWorldPos = new THREE.Vector3();
+    STATE.rightHand.getWorldPosition(handWorldPos);
+
+    // Find all door handles in current scene
+    let nearestHandle = null;
+    let minDistance = Infinity;
+
+    currentGroup.traverse((obj) => {
+        if (obj.userData.isHandle && obj.parent && obj.parent.userData.target) {
+            // Get handle's world position
+            const handleWorldPos = new THREE.Vector3();
+            obj.getWorldPosition(handleWorldPos);
+
+            const distance = handleWorldPos.distanceTo(handWorldPos);
+            if (distance < minDistance) {
+                minDistance = distance;
+                nearestHandle = obj;
+            }
+        }
+    });
+
+    const reachDistance = 2.0; // Units within which hand can grab handle
+
+    // Store previous nearest handle for releasing
+    if (STATE.nearestDoorHandle && STATE.nearestDoorHandle !== nearestHandle) {
+        // Reset previous handle if we moved away
+        STATE.nearestDoorHandle.userData.rotation = 0;
+        STATE.nearestDoorHandle = null;
+    }
+
+    if (nearestHandle && minDistance < reachDistance) {
+        STATE.nearestDoorHandle = nearestHandle;
+
+        // Highlight handle when in range (subtle glow pulse)
+        nearestHandle.traverse((mesh) => {
+            if (mesh.material && mesh.material.emissiveIntensity !== undefined) {
+                const pulse = Math.sin(STATE.time * 6) * 0.1 + 0.25;
+                mesh.material.emissiveIntensity = pulse;
+            }
+        });
+
+        // If pinching, start rotating handle
+        if (STATE.webcam.isPinching) {
+            // Track hand movement for rotation
+            const handMovement = STATE.webcam.handY; // Vertical movement for rotation
+
+            // Update handle rotation based on hand movement
+            const rotationSpeed = 2.0;
+            nearestHandle.userData.rotation += handMovement * rotationSpeed * 0.016;
+
+            // Clamp rotation between -45° and +45°
+            nearestHandle.userData.rotation = Math.max(
+                -Math.PI / 4,
+                Math.min(Math.PI / 4, nearestHandle.userData.rotation)
+            );
+
+            // Apply rotation to handle (rotate around Z axis for side handles)
+            nearestHandle.rotation.z = nearestHandle.userData.rotation;
+
+            // Check if rotation threshold reached for door opening
+            const openThreshold = Math.PI / 4; // 45 degrees
+            if (Math.abs(nearestHandle.userData.rotation) >= openThreshold * 0.9) {
+                // Trigger door opening
+                const portalGroup = nearestHandle.parent;
+                if (portalGroup && portalGroup.userData.target && !STATE.transitioning) {
+                    // Animate door opening before transition
+                    animateDoorOpening(portalGroup, nearestHandle);
+                }
+            }
+        } else {
+            // Slowly return handle to neutral position when not grabbing
+            nearestHandle.userData.rotation *= 0.9;
+            nearestHandle.rotation.z = nearestHandle.userData.rotation;
+
+            // Reset if very close to zero
+            if (Math.abs(nearestHandle.userData.rotation) < 0.01) {
+                nearestHandle.userData.rotation = 0;
+                nearestHandle.rotation.z = 0;
+            }
+        }
+    } else {
+        // Reset nearest handle reference if out of range
+        if (STATE.nearestDoorHandle) {
+            STATE.nearestDoorHandle.userData.rotation = 0;
+            STATE.nearestDoorHandle.rotation.z = 0;
+            STATE.nearestDoorHandle = null;
+        }
+    }
+}
+
+// ============================================================================
+// DOOR OPENING ANIMATION
+// ============================================================================
+
+function animateDoorOpening(portalGroup, handleObj) {
+    if (!portalGroup || STATE.transitioning) return;
+
+    STATE.transitioning = true; // Prevent multiple activations
+
+    const portalMesh = portalGroup.userData.portalMesh;
+    const targetScene = portalGroup.userData.target;
+
+    if (!portalMesh) {
+        // Fallback if no portal mesh - just transition
+        transitionToScene(targetScene);
+        return;
+    }
+
+    // Store original rotation
+    const originalRotation = portalMesh.rotation.clone();
+
+    // Determine swing direction based on portal type
+    const isCircular = portalMesh.geometry.type === 'TorusGeometry';
+    const swingAxis = isCircular ? 'x' : 'y'; // Circular portals swing on X, doors on Y
+    const swingAmount = Math.PI / 3; // 60 degrees swing
+
+    // Animate door swing over 400ms
+    const swingDuration = 400;
+    const startTime = Date.now();
+
+    function swingStep() {
+        const elapsed = Date.now() - startTime;
+        const progress = Math.min(elapsed / swingDuration, 1);
+
+        // Easing function (easeOutCubic for smooth deceleration)
+        const eased = 1 - Math.pow(1 - progress, 3);
+
+        // Apply swing rotation
+        if (swingAxis === 'y') {
+            portalMesh.rotation.y = originalRotation.y + (swingAmount * eased);
+        } else {
+            portalMesh.rotation.x = originalRotation.x + (swingAmount * eased);
+        }
+
+        // Fade portal opacity while opening
+        if (portalMesh.material.opacity !== undefined) {
+            portalMesh.material.opacity = 1 - (eased * 0.5);
+        }
+
+        if (progress < 1) {
+            requestAnimationFrame(swingStep);
+        } else {
+            // Door fully opened - trigger scene transition
+            transitionToScene(targetScene);
+
+            // Reset door after transition completes
+            setTimeout(() => {
+                portalMesh.rotation.copy(originalRotation);
+                if (portalMesh.material.opacity !== undefined) {
+                    portalMesh.material.opacity = 1;
+                }
+
+                // Reset handle
+                if (handleObj && handleObj.userData) {
+                    handleObj.userData.rotation = 0;
+                    handleObj.rotation.z = 0;
+                }
+            }, CONFIG.transitionDuration);
+        }
+    }
+
+    // Play door opening sound (placeholder)
+    console.log('Door opening sound: soft creak');
+
+    // Start swing animation
+    requestAnimationFrame(swingStep);
 }
 
 // ============================================================================
