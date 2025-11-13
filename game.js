@@ -163,63 +163,63 @@ function createFirstPersonView() {
     const bodyGroup = new THREE.Group();
     bodyGroup.name = 'bodyGroup';
 
-    // Torso (upper body)
+    // Torso (upper body) - positioned higher to be visible
     const torsoGeometry = new THREE.CylinderGeometry(0.25, 0.3, 0.5, 16);
     const torso = new THREE.Mesh(torsoGeometry, bodyMaterial.clone());
-    torso.position.set(0, -0.7, -0.3);
+    torso.position.set(0, -0.5, -0.4);
     bodyGroup.add(torso);
 
     // Waist/hip area
     const waistGeometry = new THREE.SphereGeometry(0.32, 16, 16);
     const waist = new THREE.Mesh(waistGeometry, bodyMaterial.clone());
     waist.scale.set(1, 0.5, 0.8);
-    waist.position.set(0, -0.95, -0.3);
+    waist.position.set(0, -0.75, -0.4);
     bodyGroup.add(waist);
 
-    // Left Leg
+    // Left Leg - shortened and positioned higher
     const legMaterial = bodyMaterial.clone();
     const leftLegUpper = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.12, 0.11, 0.35, 12),
+        new THREE.CylinderGeometry(0.12, 0.11, 0.3, 12),
         legMaterial.clone()
     );
-    leftLegUpper.position.set(-0.15, -1.25, -0.3);
+    leftLegUpper.position.set(-0.15, -1.0, -0.4);
     bodyGroup.add(leftLegUpper);
 
     const leftLegLower = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.1, 0.09, 0.35, 12),
+        new THREE.CylinderGeometry(0.1, 0.09, 0.3, 12),
         legMaterial.clone()
     );
-    leftLegLower.position.set(-0.15, -1.65, -0.3);
+    leftLegLower.position.set(-0.15, -1.35, -0.4);
     bodyGroup.add(leftLegLower);
 
-    // Right Leg
+    // Right Leg - shortened and positioned higher
     const rightLegUpper = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.12, 0.11, 0.35, 12),
+        new THREE.CylinderGeometry(0.12, 0.11, 0.3, 12),
         legMaterial.clone()
     );
-    rightLegUpper.position.set(0.15, -1.25, -0.3);
+    rightLegUpper.position.set(0.15, -1.0, -0.4);
     bodyGroup.add(rightLegUpper);
 
     const rightLegLower = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.1, 0.09, 0.35, 12),
+        new THREE.CylinderGeometry(0.1, 0.09, 0.3, 12),
         legMaterial.clone()
     );
-    rightLegLower.position.set(0.15, -1.65, -0.3);
+    rightLegLower.position.set(0.15, -1.35, -0.4);
     bodyGroup.add(rightLegLower);
 
-    // Feet
+    // Feet - positioned higher
     const leftFoot = new THREE.Mesh(
         new THREE.BoxGeometry(0.12, 0.08, 0.18),
         legMaterial.clone()
     );
-    leftFoot.position.set(-0.15, -1.86, -0.25);
+    leftFoot.position.set(-0.15, -1.54, -0.35);
     bodyGroup.add(leftFoot);
 
     const rightFoot = new THREE.Mesh(
         new THREE.BoxGeometry(0.12, 0.08, 0.18),
         legMaterial.clone()
     );
-    rightFoot.position.set(0.15, -1.86, -0.25);
+    rightFoot.position.set(0.15, -1.54, -0.35);
     bodyGroup.add(rightFoot);
 
     // Add shoulder area for better connection to arms
@@ -2130,12 +2130,19 @@ function updateHandTrail() {
 // ============================================================================
 
 function updateFirstPersonHands() {
-    if (!STATE.leftHand || !STATE.rightHand || !STATE.webcam.enabled) return;
+    // Always update hands and body visibility, even without webcam
+    if (!STATE.leftHand || !STATE.rightHand) return;
 
-    // Map webcam motion to hand offset from base position
-    const handOffsetX = STATE.webcam.handX * 0.15; // Scaled for screen space
-    const handOffsetY = STATE.webcam.handY * 0.1;
-    const handOffsetZ = STATE.webcam.handZ * 0.05;
+    // Map webcam motion to hand offset from base position (if webcam enabled)
+    let handOffsetX = 0;
+    let handOffsetY = 0;
+    let handOffsetZ = 0;
+
+    if (STATE.webcam.enabled) {
+        handOffsetX = STATE.webcam.handX * 0.15; // Scaled for screen space
+        handOffsetY = STATE.webcam.handY * 0.1;
+        handOffsetZ = STATE.webcam.handZ * 0.05;
+    }
 
     // Update left hand position (smoothly interpolate)
     const leftBasePos = { x: -0.3, y: -0.4, z: -0.6 };
@@ -2157,9 +2164,12 @@ function updateFirstPersonHands() {
     STATE.rightHand.position.y += (rightTargetY - STATE.rightHand.position.y) * 0.15;
     STATE.rightHand.position.z += (rightTargetZ - STATE.rightHand.position.z) * 0.15;
 
+    // Get pinch strength (0 if webcam disabled)
+    const pinchStrength = STATE.webcam.enabled ? STATE.webcam.pinchStrength : 0;
+
     // Animate hand closing based on pinch strength
-    animateFirstPersonHandClosing(STATE.leftHand, STATE.webcam.pinchStrength);
-    animateFirstPersonHandClosing(STATE.rightHand, STATE.webcam.pinchStrength);
+    animateFirstPersonHandClosing(STATE.leftHand, pinchStrength);
+    animateFirstPersonHandClosing(STATE.rightHand, pinchStrength);
 
     // Animate forearms based on hand movement
     if (STATE.leftHand.userData.forearm && STATE.rightHand.userData.forearm) {
@@ -2170,7 +2180,8 @@ function updateFirstPersonHands() {
         STATE.rightHand.userData.forearm.rotation.x += (forearmRotation - STATE.rightHand.userData.forearm.rotation.x) * 0.12;
 
         // Forearms glow more when hands are active
-        const forearmGlow = 0.2 + (STATE.webcam.motionStrength * 0.3);
+        const motionStrength = STATE.webcam.enabled ? STATE.webcam.motionStrength : 0;
+        const forearmGlow = 0.2 + (motionStrength * 0.3);
         if (STATE.leftHand.userData.forearm.material) {
             STATE.leftHand.userData.forearm.material.emissiveIntensity += (forearmGlow - STATE.leftHand.userData.forearm.material.emissiveIntensity) * 0.1;
         }
@@ -2182,14 +2193,18 @@ function updateFirstPersonHands() {
     // Animate body based on hand position
     animateBodyPosture(handOffsetX, handOffsetY, handOffsetZ);
 
-    // Check for hand-based key pickup
-    checkHandKeyPickup();
+    // Only check interactions if webcam is enabled
+    if (STATE.webcam.enabled) {
+        // Check for hand-based key pickup
+        checkHandKeyPickup();
 
-    // Check for door handle interaction
-    checkHandDoorHandleInteraction();
+        // Check for door handle interaction
+        checkHandDoorHandleInteraction();
+    }
 
     // Add subtle idle animation when not moving
-    if (STATE.webcam.motionStrength < 0.05) {
+    const motionStrength = STATE.webcam.enabled ? STATE.webcam.motionStrength : 0;
+    if (motionStrength < 0.05) {
         const idleOffset = Math.sin(STATE.time * 1.2) * 0.02;
         STATE.leftHand.position.y += idleOffset;
         STATE.rightHand.position.y -= idleOffset; // Opposite phase
@@ -2229,12 +2244,12 @@ function animateBodyPosture(handOffsetX, handOffsetY, handOffsetZ) {
     bodyParts.torso.scale.z = breathingScale;
 
     // Adjust torso position for upward stretch
-    const torsoBaseY = -0.7;
+    const torsoBaseY = -0.5;
     const torsoTargetY = torsoBaseY + upwardStretch;
     bodyParts.torso.position.y += (torsoTargetY - bodyParts.torso.position.y) * 0.12;
 
     // Waist follows torso with slight delay
-    const waistBaseY = -0.95;
+    const waistBaseY = -0.75;
     const waistTargetY = waistBaseY + (upwardStretch * 0.7);
     bodyParts.waist.position.y += (waistTargetY - bodyParts.waist.position.y) * 0.1;
 
@@ -2242,7 +2257,7 @@ function animateBodyPosture(handOffsetX, handOffsetY, handOffsetZ) {
     const legLeanFactor = forwardLean * 0.5;
 
     // Upper legs follow body lean
-    const legUpperBaseY = -1.25;
+    const legUpperBaseY = -1.0;
     const legUpperTargetY = legUpperBaseY + (upwardStretch * 0.3);
 
     bodyParts.leftLegUpper.position.y += (legUpperTargetY - bodyParts.leftLegUpper.position.y) * 0.08;
@@ -2253,7 +2268,7 @@ function animateBodyPosture(handOffsetX, handOffsetY, handOffsetZ) {
     bodyParts.rightLegUpper.rotation.x += (legLeanFactor - bodyParts.rightLegUpper.rotation.x) * 0.08;
 
     // Lower legs have minimal adjustment
-    const legLowerBaseY = -1.65;
+    const legLowerBaseY = -1.35;
     bodyParts.leftLegLower.position.y += (legLowerBaseY - bodyParts.leftLegLower.position.y) * 0.05;
     bodyParts.rightLegLower.position.y += (legLowerBaseY - bodyParts.rightLegLower.position.y) * 0.05;
 
