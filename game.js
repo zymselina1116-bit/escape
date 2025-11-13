@@ -1204,6 +1204,90 @@ function createKey(options) {
 }
 
 // ============================================================================
+// DOOR HANDLE CREATION HELPER
+// ============================================================================
+
+function createDoorHandle(portalType, size) {
+    const handleGroup = new THREE.Group();
+    handleGroup.name = 'doorHandle';
+
+    // Handle material - metallic and slightly glowing
+    const handleMaterial = new THREE.MeshStandardMaterial({
+        color: 0xc9b583,
+        emissive: 0xffd699,
+        emissiveIntensity: 0.15,
+        metalness: 0.9,
+        roughness: 0.2
+    });
+
+    if (portalType === 'circular') {
+        // Central handle for circular portals
+        const handle = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.08, 0.08, 0.4, 16),
+            handleMaterial
+        );
+        handle.rotation.z = Math.PI / 2;
+        handleGroup.add(handle);
+
+        // End caps
+        const cap1 = new THREE.Mesh(
+            new THREE.SphereGeometry(0.09, 12, 12),
+            handleMaterial
+        );
+        cap1.position.x = -0.2;
+        handleGroup.add(cap1);
+
+        const cap2 = new THREE.Mesh(
+            new THREE.SphereGeometry(0.09, 12, 12),
+            handleMaterial
+        );
+        cap2.position.x = 0.2;
+        handleGroup.add(cap2);
+
+        // Position at center
+        handleGroup.position.set(0, 0, 0.15);
+
+    } else {
+        // Side lever handle for rectangular portals
+        const leverBase = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.06, 0.06, 0.15, 12),
+            handleMaterial
+        );
+        leverBase.rotation.x = Math.PI / 2;
+        handleGroup.add(leverBase);
+
+        const leverHandle = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.04, 0.04, 0.25, 12),
+            handleMaterial
+        );
+        leverHandle.position.set(0, -0.12, 0);
+        leverHandle.rotation.z = Math.PI / 2;
+        handleGroup.add(leverHandle);
+
+        const leverEnd = new THREE.Mesh(
+            new THREE.SphereGeometry(0.05, 12, 12),
+            handleMaterial
+        );
+        leverEnd.position.set(0.125, -0.12, 0);
+        handleGroup.add(leverEnd);
+
+        // Position on right side of door at handle height
+        const handleHeight = size[1] * 0.45; // Slightly below middle
+        const handleX = size[0] * 0.35; // Right side
+        handleGroup.position.set(handleX, handleHeight, size[2] / 2 + 0.08);
+    }
+
+    handleGroup.userData = {
+        isHandle: true,
+        rotation: 0,
+        baseRotation: 0,
+        canGrab: true
+    };
+
+    return handleGroup;
+}
+
+// ============================================================================
 // PORTAL CREATION HELPER
 // ============================================================================
 
@@ -1285,11 +1369,16 @@ function createPortal(options) {
 
     group.add(glow);
 
+    // Add door handle
+    const doorHandle = createDoorHandle(type, size);
+    group.add(doorHandle);
+
     group.position.set(...position);
     group.userData = {
         target: target,
         portalMesh: portalMesh,
         glow: glow,
+        doorHandle: doorHandle,
         baseEmissive: emissiveIntensity,
         interactive: true
     };
@@ -1938,6 +2027,9 @@ function updateFirstPersonHands() {
     animateFirstPersonHandClosing(STATE.leftHand, STATE.webcam.pinchStrength);
     animateFirstPersonHandClosing(STATE.rightHand, STATE.webcam.pinchStrength);
 
+    // Check for hand-based key pickup
+    checkHandKeyPickup();
+
     // Add subtle idle animation when not moving
     if (STATE.webcam.motionStrength < 0.05) {
         const idleOffset = Math.sin(STATE.time * 1.2) * 0.02;
@@ -1979,6 +2071,81 @@ function animateFirstPersonHandClosing(hand, closingAmount) {
     if (hand.userData.palm && hand.userData.palm.material) {
         hand.userData.palm.material.emissiveIntensity = 0.2 + currentClosed * 0.3;
         hand.userData.palm.material.opacity = 0.95 + currentClosed * 0.05;
+    }
+}
+
+// ============================================================================
+// HAND-BASED KEY PICKUP SYSTEM
+// ============================================================================
+
+function checkHandKeyPickup() {
+    if (!STATE.rightHand || !STATE.webcam.enabled) return;
+
+    const currentGroup = STATE.sceneGroups[STATE.currentScene];
+    if (!currentGroup) return;
+
+    // Get right hand's world position
+    const handWorldPos = new THREE.Vector3();
+    STATE.rightHand.getWorldPosition(handWorldPos);
+
+    // Find all uncollected keys in current scene
+    let nearestKey = null;
+    let minDistance = Infinity;
+
+    currentGroup.traverse((obj) => {
+        if (obj.userData.isKey && !obj.userData.collected) {
+            const distance = obj.position.distanceTo(handWorldPos);
+            if (distance < minDistance) {
+                minDistance = distance;
+                nearestKey = obj;
+            }
+        }
+    });
+
+    // Check if hand is near a key and pinching
+    const reachDistance = 2.5; // Units within which hand can grab key
+
+    if (nearestKey && minDistance < reachDistance) {
+        // Highlight nearest key when in range
+        if (nearestKey.userData.glow) {
+            const pulse = Math.sin(STATE.time * 8) * 0.3 + 0.5;
+            nearestKey.userData.glow.material.opacity = pulse;
+        }
+
+        // If pinching and not already grabbing a key
+        if (STATE.webcam.isPinching && !STATE.grabbedKey) {
+            STATE.grabbedKey = nearestKey;
+            nearestKey.userData.beingGrabbed = true;
+        }
+    }
+
+    // Animate grabbed key toward hand
+    if (STATE.grabbedKey && STATE.grabbedKey.userData.beingGrabbed) {
+        const key = STATE.grabbedKey;
+
+        // Move key toward hand palm
+        const targetPos = handWorldPos.clone();
+        targetPos.y -= 0.1; // Offset to palm center
+
+        key.position.lerp(targetPos, 0.2);
+
+        // Scale down key as it approaches
+        const distanceToHand = key.position.distanceTo(targetPos);
+        const scaleAmount = Math.max(0.3, 1 - (1 / Math.max(distanceToHand, 0.5)));
+        key.scale.setScalar(scaleAmount);
+
+        // When key reaches hand, collect it
+        if (distanceToHand < 0.3) {
+            collectKey(key);
+            STATE.grabbedKey = null;
+        }
+
+        // Release if hand opens
+        if (!STATE.webcam.isPinching) {
+            key.userData.beingGrabbed = false;
+            key.scale.setScalar(1.0);
+            STATE.grabbedKey = null;
+        }
     }
 }
 
